@@ -1,5 +1,8 @@
 //! Simple egui application for interacting with Parquet files.
 
+// Expose example functions for GUI callbacks or tests.
+pub mod parquet_examples;
+
 use eframe::{egui, epi};
 
 /// Defines the user selected operation on the Parquet file.
