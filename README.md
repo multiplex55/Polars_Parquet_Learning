@@ -48,3 +48,18 @@ displayed containing a text field, radio buttons for the operation and a **Run**
 button.  All heavy lifting is handled by Polars; the GUI simply wires the chosen
 action to the example functions.
 
+## Additional examples
+
+The `parquet_examples` module includes several helper functions that showcase
+common patterns:
+
+* **`read_selected_columns`** – lazily read only a subset of columns from a
+  Parquet file.
+* **`filter_by_name_prefix`** – apply an expression to filter rows before they
+  are collected into a `DataFrame`.
+* **`read_parquet_metadata`** – inspect low level metadata with the `parquet`
+  crate without loading the entire file.
+
+See [`src/parquet_examples.rs`](src/parquet_examples.rs) for implementation
+details and tests for each use case.
+
