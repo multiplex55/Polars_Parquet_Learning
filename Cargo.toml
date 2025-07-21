@@ -4,4 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# Polars DataFrame library with Parquet support
+polars = { version = "0.39", features = ["lazy", "parquet"] }
 
+# Low level Parquet crate (optional when using Polars)
+parquet = "51"
+
+# Serialization support
+serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+
+# GUI framework built on egui
+eframe = "0.25"
+egui = "0.25"
+
+# Simplified error handling
+anyhow = "1.0"
