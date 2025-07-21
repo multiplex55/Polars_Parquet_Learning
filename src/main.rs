@@ -3,10 +3,10 @@
 // Expose example functions for GUI callbacks or tests.
 pub mod parquet_examples;
 
-use eframe::{egui, epi};
+use eframe::egui;
 
 /// Defines the user selected operation on the Parquet file.
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Operation {
     Read,
     Modify,
@@ -71,7 +71,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Polars Parquet Learning",
         options,
-        Box::new(|cc| Box::new(ParquetApp::new(cc))),
+        Box::new(|cc| Ok::<Box<dyn eframe::App>, _>(Box::new(ParquetApp::new(cc)))),
     )
 }
-

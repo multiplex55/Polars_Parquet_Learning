@@ -41,19 +41,21 @@ pub fn read_parquet_to_dataframe(path: &str) -> Result<DataFrame> {
 /// the network or written to other formats.
 pub fn dataframe_to_records(df: &DataFrame) -> Result<Vec<Record>> {
     let id = df.column("id")?.i64()?;
-    let name = df.column("name")?.utf8()?;
+    let name = df.column("name")?.str()?;
 
-    let records = id
+    let records: Result<Vec<Record>> = id
         .into_iter()
         .zip(name.into_iter())
-        .map(|(opt_id, opt_name)| Record {
-            id: opt_id.ok_or_else(|| PolarsError::NoData("null id".into()))?,
-            name: opt_name
-                .ok_or_else(|| PolarsError::NoData("null name".into()))?
-                .to_string(),
+        .map(|(opt_id, opt_name)| {
+            Ok(Record {
+                id: opt_id.ok_or_else(|| PolarsError::NoData("null id".into()))?,
+                name: opt_name
+                    .ok_or_else(|| PolarsError::NoData("null name".into()))?
+                    .to_string(),
+            })
         })
         .collect();
-    Ok(records)
+    records
 }
 
 /// Modify the provided records in place.
@@ -84,8 +86,9 @@ pub fn records_to_dataframe(records: &[Record]) -> Result<DataFrame> {
 /// materialised in memory this uses the eager API.  In a real application the
 /// lazy API could be used to stream results directly to disk.
 pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
+    let mut df = df.clone();
     let file = File::create(path)?;
-    ParquetWriter::new(file).finish(df)?;
+    ParquetWriter::new(file).finish(&mut df)?;
     Ok(())
 }
 
@@ -95,11 +98,8 @@ pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
 /// during the scan which can significantly reduce IO for wide tables.  The
 /// selected columns are then collected into an eager [`DataFrame`].
 pub fn read_selected_columns(path: &str, columns: &[&str]) -> Result<DataFrame> {
-    let args = ScanArgsParquet {
-        with_columns: Some(columns.iter().map(|s| s.to_string()).collect()),
-        ..Default::default()
-    };
-    let lf = LazyFrame::scan_parquet(path, args)?;
+    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?
+        .select(columns.iter().map(|c| col(*c)).collect::<Vec<_>>());
     Ok(lf.collect()?)
 }
 
