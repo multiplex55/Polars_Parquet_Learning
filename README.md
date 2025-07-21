@@ -1,2 +1,50 @@
-# Polars_Parquet_Learning
-Polars_Parquet_Learning
+# Polars Parquet Learning
+
+Minimal playground demonstrating how to work with [Polars](https://pola.rs/) and
+[Parquet](https://parquet.apache.org/) in Rust.  A tiny GUI built on top of
+[egui](https://github.com/emilk/egui) allows selecting a file and performing a
+basic read/modify/write cycle.
+
+## Building and running
+
+This project uses the Rust 2024 edition.  A recent stable toolchain is
+recommended.  To compile everything and launch the GUI:
+
+```bash
+cargo run
+```
+
+For release builds use `cargo build --release` followed by the generated binary
+in `target/release/Polars_Parquet_Learning`.
+
+## Example workflow
+
+1. Start the application with `cargo run`.
+2. Enter the path to a Parquet file in the **File** field.
+3. Choose **Read**, **Modify** or **Write** from the available operations.
+   * **Read**: loads the file into a `DataFrame` using the lazy API.
+   * **Modify**: converts rows to typed `Record`s, applies `modify_records`
+     (appends `!` to each name) and displays the results.
+   * **Write**: writes the modified `DataFrame` back to disk.
+4. Click **Run** to perform the selected action.  Status is printed to stdout.
+
+The helper functions live in [`src/parquet_examples.rs`](src/parquet_examples.rs)
+and are covered by the `round_trip` unit test.
+
+## Polars and Parquet notes
+
+Polars stores data in columnar Arrow memory which is efficient for analytical
+workloads.  Large datasets may require substantial RAM; prefer the lazy API when
+possible.  Parquet enforces strict schemas so field names and types must match
+when writing new files.  The `polars` crate already includes a mature Parquet
+implementation so the lower level `parquet` dependency is optional here.
+
+## GUI overview
+
+The interface is implemented using
+[eframe](https://docs.rs/eframe/latest/eframe/) and
+[egui](https://docs.rs/egui/latest/egui/).  When launched a small window is
+displayed containing a text field, radio buttons for the operation and a **Run**
+button.  All heavy lifting is handled by Polars; the GUI simply wires the chosen
+action to the example functions.
+
