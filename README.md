@@ -21,12 +21,17 @@ in `target/release/Polars_Parquet_Learning`.
 
 1. Start the application with `cargo run`.
 2. Enter the path to a Parquet file in the **File** field.
-3. Choose **Read**, **Modify** or **Write** from the available operations.
-   * **Read**: loads the file into a `DataFrame` using the lazy API.
-   * **Modify**: converts rows to typed `Record`s, applies `modify_records`
-     (appends `!` to each name) and displays the results.
-   * **Write**: writes the modified `DataFrame` back to disk.
-4. Click **Run** to perform the selected action.  Status is printed to stdout.
+3. Choose one of the available operations.
+   * **Read**: load an existing file into a `DataFrame` using the lazy API.
+   * **Modify**: convert rows to typed `Record`s and append `!` to each name.
+   * **Write**: write the current in-memory `DataFrame` back to the path in **File**.
+   * **Create**: define a schema and rows in the UI then save to the **Save** path.
+   * **Partition**: split the loaded `DataFrame` by the selected column and
+     write partitions using the **Save** path as a prefix.
+   * **Query**: filter the file by a name prefix.
+4. Use the **Save** field to specify where newly created or partitioned data
+   should be written.
+5. Click **Run** to perform the selected action. Status is printed to stdout.
 
 The helper functions live in [`src/parquet_examples.rs`](src/parquet_examples.rs)
 and are covered by the `round_trip` unit test.
