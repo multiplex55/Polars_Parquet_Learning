@@ -89,6 +89,45 @@ pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Lazily read only a subset of columns from a Parquet file.
+///
+/// Providing a slice of column names allows Polars to skip all other data
+/// during the scan which can significantly reduce IO for wide tables.  The
+/// selected columns are then collected into an eager [`DataFrame`].
+pub fn read_selected_columns(path: &str, columns: &[&str]) -> Result<DataFrame> {
+    let args = ScanArgsParquet {
+        with_columns: Some(columns.iter().map(|s| s.to_string()).collect()),
+        ..Default::default()
+    };
+    let lf = LazyFrame::scan_parquet(path, args)?;
+    Ok(lf.collect()?)
+}
+
+/// Filter rows in a Parquet file by a prefix on the `name` column.
+///
+/// This demonstrates constructing an expression on a `LazyFrame` before
+/// materialising the result.  Only rows beginning with the provided prefix are
+/// returned.
+pub fn filter_by_name_prefix(path: &str, prefix: &str) -> Result<DataFrame> {
+    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+    Ok(lf
+        .filter(col("name").str().starts_with(lit(prefix)))
+        .collect()?)
+}
+
+/// Retrieve low level metadata from a Parquet file using the `parquet` crate.
+///
+/// Accessing the metadata can be useful for quickly inspecting files without
+/// loading the data into memory.  The returned structure exposes row group and
+/// column information among other details.
+pub fn read_parquet_metadata(path: &str) -> Result<parquet::file::metadata::ParquetMetaData> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    let file = File::open(path)?;
+    let reader = SerializedFileReader::new(file)?;
+    Ok(reader.metadata().clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,6 +157,29 @@ mod tests {
         let final_df = read_parquet_to_dataframe(output_path.to_str().unwrap())?;
         let final_records = dataframe_to_records(&final_df)?;
         assert_eq!(final_records[0].name, "a!");
+        Ok(())
+    }
+
+    #[test]
+    fn extra_examples() -> Result<()> {
+        let dir = tempdir()?;
+        let file = dir.path().join("data.parquet");
+
+        let df = df!("id" => &[1i64, 2, 3], "name" => &["alice", "bob", "anne"])?;
+        write_dataframe_to_parquet(&df, file.to_str().unwrap())?;
+
+        // Reading only the "id" column
+        let cols = read_selected_columns(file.to_str().unwrap(), &["id"])?;
+        assert_eq!(cols.get_column_names(), vec!["id"]);
+
+        // Filtering by prefix
+        let filtered = filter_by_name_prefix(file.to_str().unwrap(), "a")?;
+        assert_eq!(filtered.height(), 2);
+
+        // Metadata should report a single row group
+        let meta = read_parquet_metadata(file.to_str().unwrap())?;
+        assert_eq!(meta.num_row_groups(), 1);
+
         Ok(())
     }
 }
