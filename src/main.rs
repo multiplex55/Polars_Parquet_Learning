@@ -186,6 +186,26 @@ impl eframe::App for ParquetApp {
                         }
                     });
                 }
+                Operation::Write => {
+                    if let Some(df) = &self.edit_df {
+                        egui::ComboBox::from_label("Partition column")
+                            .selected_text(
+                                self.partition_column
+                                    .clone()
+                                    .unwrap_or_else(|| "None".to_string()),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.partition_column, None, "None");
+                                for name in df.get_column_names_str() {
+                                    ui.selectable_value(
+                                        &mut self.partition_column,
+                                        Some(name.to_string()),
+                                        name,
+                                    );
+                                }
+                            });
+                    }
+                }
                 Operation::Partition => {
                     if let Some(df) = &self.edit_df {
                         egui::ComboBox::from_label("Column")
@@ -233,9 +253,11 @@ impl eframe::App for ParquetApp {
                     }
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
-                            if parquet_examples::write_dataframe_to_parquet(df, &self.file_path)
-                                .is_ok()
-                            {
+                            if let Some(col) = &self.partition_column {
+                                if parquet_examples::write_partitioned(df, col, &self.save_path).is_ok() {
+                                    println!("Wrote partitions to {}", self.save_path);
+                                }
+                            } else if parquet_examples::write_dataframe_to_parquet(df, &self.file_path).is_ok() {
                                 println!("Wrote {}", self.file_path);
                             }
                         }
@@ -253,7 +275,7 @@ impl eframe::App for ParquetApp {
                     }
                     Operation::Partition => {
                         if let (Some(df), Some(col)) = (&self.edit_df, &self.partition_column) {
-                            let _ = parquet_examples::write_partitioned(df, &self.save_path, col);
+                            let _ = parquet_examples::write_partitioned(df, col, &self.save_path);
                         }
                     }
                     Operation::Query => {
