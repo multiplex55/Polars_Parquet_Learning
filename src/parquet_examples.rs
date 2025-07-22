@@ -92,6 +92,50 @@ pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Build a new [`DataFrame`] from a user provided schema and row data.
+///
+/// The `schema` slice defines column names and their [`DataType`].  `rows`
+/// contains values for each row using [`AnyValue`] to allow mixed types.
+pub fn create_dataframe(
+    schema: &[(String, DataType)],
+    rows: &[Vec<AnyValue>],
+) -> Result<DataFrame> {
+    use polars::prelude::{IntoColumn, Series};
+
+    let mut cols: Vec<Column> = Vec::with_capacity(schema.len());
+    for (idx, (name, dtype)) in schema.iter().enumerate() {
+        // gather all values for this column
+        let values: Vec<AnyValue> = rows
+            .iter()
+            .map(|r| r.get(idx).cloned().unwrap_or(AnyValue::Null))
+            .collect();
+        let s = Series::from_any_values_and_dtype(name.clone().into(), &values, dtype, true)?;
+        cols.push(s.into_column());
+    }
+    Ok(DataFrame::new(cols)?)
+}
+
+/// Write the [`DataFrame`] partitioned by the `key` column to disk.
+///
+/// Each unique value of `key` will result in a file named
+/// `out_dir/key=value.parquet`.
+pub fn write_partitioned(df: &DataFrame, out_dir: &str, key: &str) -> Result<()> {
+    std::fs::create_dir_all(out_dir)?;
+    for part in df.partition_by([key], true)? {
+        let value = part.column(key)?.get(0)?.to_string();
+        let file = format!("{}/{}={}.parquet", out_dir, key, value);
+        write_dataframe_to_parquet(&part, &file)?;
+    }
+    Ok(())
+}
+
+/// Read all Parquet files in a directory and concatenate them into a single [`DataFrame`].
+pub fn read_partitions(dir: &str) -> Result<DataFrame> {
+    let pattern = format!("{}/*.parquet", dir.trim_end_matches('/'));
+    let lf = LazyFrame::scan_parquet(&pattern, ScanArgsParquet::default())?;
+    Ok(lf.collect()?)
+}
+
 /// Lazily read only a subset of columns from a Parquet file.
 ///
 /// Providing a slice of column names allows Polars to skip all other data
@@ -180,6 +224,28 @@ mod tests {
         let meta = read_parquet_metadata(file.to_str().unwrap())?;
         assert_eq!(meta.num_row_groups(), 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn partition_round_trip() -> Result<()> {
+        let dir = tempdir()?;
+        let part_dir = dir.path().join("parts");
+
+        let schema = vec![
+            ("id".to_string(), DataType::Int64),
+            ("name".to_string(), DataType::String),
+        ];
+        let rows = vec![
+            vec![AnyValue::Int64(1), AnyValue::String("a".into())],
+            vec![AnyValue::Int64(2), AnyValue::String("b".into())],
+        ];
+
+        let df = create_dataframe(&schema, &rows)?;
+        write_partitioned(&df, part_dir.to_str().unwrap(), "name")?;
+
+        let read = read_partitions(part_dir.to_str().unwrap())?;
+        assert_eq!(read.shape(), df.shape());
         Ok(())
     }
 }
