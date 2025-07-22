@@ -301,6 +301,26 @@ mod tests {
     }
 
     #[test]
+    fn create_dataframe_floats_and_bools() -> Result<()> {
+        let schema = vec![
+            ("val".to_string(), DataType::Float64),
+            ("flag".to_string(), DataType::Boolean),
+        ];
+        let rows = vec![
+            vec![AnyValue::Float64(1.5), AnyValue::Boolean(true)],
+            vec![AnyValue::Float64(2.5), AnyValue::Boolean(false)],
+        ];
+
+        let df = create_dataframe(&schema, &rows)?;
+        assert_eq!(df.dtypes(), vec![DataType::Float64, DataType::Boolean]);
+        let vals: Vec<f64> = df.column("val")?.f64()?.into_no_null_iter().collect();
+        let flags: Vec<bool> = df.column("flag")?.bool()?.into_no_null_iter().collect();
+        assert_eq!(vals, vec![1.5, 2.5]);
+        assert_eq!(flags, vec![true, false]);
+        Ok(())
+    }
+
+    #[test]
     fn scan_directory_multiple_files() -> Result<()> {
         let dir = tempdir()?;
         let f1 = dir.path().join("one.parquet");

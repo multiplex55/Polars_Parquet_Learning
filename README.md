@@ -76,3 +76,6 @@ the **Save** field will write the result as a Parquet file when **Run** is
 clicked. The helper function [`create_dataframe`](src/parquet_examples.rs) shows
 how to accomplish the same programmatically.
 
+Allowed column types are `int`/`i64`, `str`/`string`, `float`/`f64` and
+`bool`/`boolean`.
+
