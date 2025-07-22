@@ -143,6 +143,16 @@ pub fn read_partitions(dir: &str) -> Result<DataFrame> {
     Ok(lf.collect()?)
 }
 
+/// Read all Parquet files in a directory using a single scan.
+///
+/// Passing either a directory path or a glob pattern allows Polars to treat
+/// every matching file as one logical dataset.  The combined result is
+/// collected into an eager [`DataFrame`].
+pub fn read_parquet_directory(dir: &str) -> Result<DataFrame> {
+    let lf = LazyFrame::scan_parquet(dir, ScanArgsParquet::default())?;
+    Ok(lf.collect()?)
+}
+
 /// Lazily read only a subset of columns from a Parquet file.
 ///
 /// Providing a slice of column names allows Polars to skip all other data
@@ -287,6 +297,23 @@ mod tests {
             .collect();
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(names_col, vec!["a".to_string(), "b".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn scan_directory_multiple_files() -> Result<()> {
+        let dir = tempdir()?;
+        let f1 = dir.path().join("one.parquet");
+        let f2 = dir.path().join("two.parquet");
+
+        let df1 = df!("id" => &[1i64], "name" => &["a"])?;
+        let df2 = df!("id" => &[2i64], "name" => &["b"])?;
+
+        write_dataframe_to_parquet(&df1, f1.to_str().unwrap())?;
+        write_dataframe_to_parquet(&df2, f2.to_str().unwrap())?;
+
+        let read = read_parquet_directory(dir.path().to_str().unwrap())?;
+        assert_eq!(read.height(), df1.height() + df2.height());
         Ok(())
     }
 }
