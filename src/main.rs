@@ -17,6 +17,10 @@ enum Operation {
     Read,
     Modify,
     Write,
+    /// Write the DataFrame to CSV
+    WriteCsv,
+    /// Write the DataFrame to JSON
+    WriteJson,
     /// Create a new DataFrame in memory
     Create,
     /// Partition the currently loaded DataFrame by a column
@@ -192,10 +196,19 @@ impl eframe::App for ParquetApp {
                 ui.label("File:");
                 ui.text_edit_singleline(&mut self.file_path);
                 if ui.button("...").clicked() {
-                    if let Some(path) = FileDialog::new()
-                        .add_filter("Parquet", &["parquet"])
-                        .pick_file()
-                    {
+                    let mut dialog = FileDialog::new();
+                    match self.operation {
+                        Operation::WriteCsv => {
+                            dialog = dialog.add_filter("CSV", &["csv"]);
+                        }
+                        Operation::WriteJson => {
+                            dialog = dialog.add_filter("JSON", &["json"]);
+                        }
+                        _ => {
+                            dialog = dialog.add_filter("Parquet", &["parquet"]);
+                        }
+                    }
+                    if let Some(path) = dialog.pick_file() {
                         self.file_path = path.display().to_string();
                     }
                 }
@@ -207,6 +220,8 @@ impl eframe::App for ParquetApp {
                 ui.radio_value(&mut self.operation, Operation::Read, "Read");
                 ui.radio_value(&mut self.operation, Operation::Modify, "Modify");
                 ui.radio_value(&mut self.operation, Operation::Write, "Write");
+                ui.radio_value(&mut self.operation, Operation::WriteCsv, "Write CSV");
+                ui.radio_value(&mut self.operation, Operation::WriteJson, "Write JSON");
                 ui.radio_value(&mut self.operation, Operation::Create, "Create");
                 ui.radio_value(&mut self.operation, Operation::Partition, "Partition");
                 ui.radio_value(&mut self.operation, Operation::Query, "Query");
@@ -216,10 +231,19 @@ impl eframe::App for ParquetApp {
                 ui.label("Save:");
                 ui.text_edit_singleline(&mut self.save_path);
                 if ui.button("...").clicked() {
-                    if let Some(path) = FileDialog::new()
-                        .add_filter("Parquet", &["parquet"])
-                        .save_file()
-                    {
+                    let mut dialog = FileDialog::new();
+                    match self.operation {
+                        Operation::WriteCsv => {
+                            dialog = dialog.add_filter("CSV", &["csv"]);
+                        }
+                        Operation::WriteJson => {
+                            dialog = dialog.add_filter("JSON", &["json"]);
+                        }
+                        _ => {
+                            dialog = dialog.add_filter("Parquet", &["parquet"]);
+                        }
+                    }
+                    if let Some(path) = dialog.save_file() {
                         self.save_path = path.display().to_string();
                     }
                 }
@@ -383,8 +407,7 @@ impl eframe::App for ParquetApp {
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
                             if let Some(col) = &self.partition_column {
-                                match parquet_examples::write_partitioned(df, col, &self.save_path)
-                                {
+                                match parquet_examples::write_partitioned(df, col, &self.save_path) {
                                     Ok(_) => {
                                         self.status =
                                             format!("Wrote partitions to {}", self.save_path)
@@ -402,6 +425,22 @@ impl eframe::App for ParquetApp {
                                     let res = background::write_dataframe(df, file).await;
                                     let _ = tx.send(res);
                                 });
+                            }
+                        }
+                    }
+                    Operation::WriteCsv => {
+                        if let Some(df) = &self.edit_df {
+                            match parquet_examples::write_dataframe_to_csv(df, &self.file_path) {
+                                Ok(_) => self.status = format!("Wrote {}", self.file_path),
+                                Err(e) => self.status = format!("Write failed: {e}"),
+                            }
+                        }
+                    }
+                    Operation::WriteJson => {
+                        if let Some(df) = &self.edit_df {
+                            match parquet_examples::write_dataframe_to_json(df, &self.file_path) {
+                                Ok(_) => self.status = format!("Wrote {}", self.file_path),
+                                Err(e) => self.status = format!("Write failed: {e}"),
                             }
                         }
                     }
