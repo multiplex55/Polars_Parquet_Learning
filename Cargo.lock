@@ -15,6 +15,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
