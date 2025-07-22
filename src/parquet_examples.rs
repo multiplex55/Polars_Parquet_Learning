@@ -129,7 +129,11 @@ pub fn create_dataframe(
 pub fn write_partitioned(df: &DataFrame, column: &str, dir: &str) -> Result<()> {
     std::fs::create_dir_all(dir)?;
     for part in df.partition_by([column], true)? {
-        let value = part.column(column)?.get(0)?.to_string();
+        let series = part.column(column)?;
+        let mut value = series.get(0)?.to_string();
+        if matches!(series.dtype(), DataType::String) {
+            value = value.trim_matches('"').replace(['/', '\\'], "_");
+        }
         let file = format!("{}/{}.parquet", dir.trim_end_matches('/'), value);
         write_dataframe_to_parquet(&part, &file)?;
     }
@@ -266,7 +270,7 @@ mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         files.sort();
-        assert_eq!(files, vec!["\"a\".parquet", "\"b\".parquet"]);
+        assert_eq!(files, vec!["a.parquet", "b.parquet"]);
 
         let read = read_partitions(part_dir.to_str().unwrap())?;
         assert_eq!(read.shape(), df.shape());
