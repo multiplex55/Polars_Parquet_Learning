@@ -66,6 +66,8 @@ struct ParquetApp {
     runtime: tokio::runtime::Runtime,
     /// Receives results from background jobs
     result_rx: Option<std::sync::mpsc::Receiver<anyhow::Result<background::JobResult>>>,
+    /// Metadata for the loaded Parquet file
+    metadata: Option<parquet::file::metadata::ParquetMetaData>,
     /// Indicates an operation is running
     busy: bool,
 }
@@ -88,6 +90,7 @@ impl Default for ParquetApp {
             display_rows: 5,
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
             result_rx: None,
+            metadata: None,
             busy: false,
         }
     }
@@ -182,6 +185,9 @@ impl eframe::App for ParquetApp {
                         Ok(JobResult::DataFrame(df)) => {
                             self.status = format!("Loaded {} rows", df.height());
                             self.edit_df = Some(df);
+                            if let Ok(meta) = parquet_examples::read_parquet_metadata(&self.file_path) {
+                                self.metadata = Some(meta);
+                            }
                         }
                         Ok(JobResult::Unit) => {
                             self.status = "Done".into();
@@ -362,6 +368,25 @@ impl eframe::App for ParquetApp {
                         }
                     });
                 });
+                if let Some(meta) = &self.metadata {
+                    ui.separator();
+                    ui.label("Metadata");
+                    egui::Grid::new("meta_grid").striped(true).show(ui, |ui| {
+                        ui.label(format!("Row groups: {}", meta.num_row_groups()));
+                        ui.end_row();
+                        for (i, rg) in meta.row_groups().iter().enumerate() {
+                            ui.label(format!("Row group {i}: {} rows", rg.num_rows()));
+                            ui.end_row();
+                        }
+                        ui.end_row();
+                        ui.label("Columns:");
+                        ui.end_row();
+                        for col in meta.file_metadata().schema_descr().columns() {
+                            ui.label(format!("{} ({:?})", col.name(), col.physical_type()));
+                            ui.end_row();
+                        }
+                    });
+                }
             }
 
             ui.separator();
