@@ -68,3 +68,11 @@ common patterns:
 See [`src/parquet_examples.rs`](src/parquet_examples.rs) for implementation
 details and tests for each use case.
 
+## Creating a DataFrame from scratch
+
+Choose the **Create** mode in the GUI to build a brand new dataset. Add column
+names and their types then enter one or more rows of data. Providing a path in
+the **Save** field will write the result as a Parquet file when **Run** is
+clicked. The helper function [`create_dataframe`](src/parquet_examples.rs) shows
+how to accomplish the same programmatically.
+
