@@ -2,11 +2,14 @@
 
 // Expose example functions for GUI callbacks or tests.
 pub mod parquet_examples;
+pub mod background;
 
 use anyhow::Result;
 use eframe::egui;
 use polars::prelude::*;
 use rfd::FileDialog;
+use std::sync::mpsc;
+use background::JobResult;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -53,6 +56,12 @@ struct ParquetApp {
     status: String,
     /// Number of rows to display from the current DataFrame
     display_rows: usize,
+    /// Tokio runtime for background tasks
+    runtime: tokio::runtime::Runtime,
+    /// Receives results from background jobs
+    result_rx: Option<std::sync::mpsc::Receiver<anyhow::Result<background::JobResult>>>,
+    /// Indicates an operation is running
+    busy: bool,
 }
 
 impl Default for ParquetApp {
@@ -70,6 +79,9 @@ impl Default for ParquetApp {
             query_prefix: String::new(),
             status: String::new(),
             display_rows: 5,
+            runtime: tokio::runtime::Runtime::new().expect("runtime"),
+            result_rx: None,
+            busy: false,
         }
     }
 }
@@ -154,6 +166,23 @@ impl eframe::App for ParquetApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Polars Parquet Learning");
+
+            if let Some(rx) = &self.result_rx {
+                if let Ok(res) = rx.try_recv() {
+                    self.busy = false;
+                    self.result_rx = None;
+                    match res {
+                        Ok(JobResult::DataFrame(df)) => {
+                            self.status = format!("Loaded {} rows", df.height());
+                            self.edit_df = Some(df);
+                        }
+                        Ok(JobResult::Unit) => {
+                            self.status = "Done".into();
+                        }
+                        Err(e) => self.status = format!("Failed: {e}"),
+                    }
+                }
+            }
 
             // Input field for the Parquet file path
             ui.horizontal(|ui| {
@@ -306,18 +335,23 @@ impl eframe::App for ParquetApp {
 
             ui.separator();
             ui.label(&self.status);
+            if self.busy {
+                ui.add(egui::Spinner::new());
+            }
 
             // Run the selected action
-            if ui.button("Run").clicked() {
+            if ui.add_enabled(!self.busy, egui::Button::new("Run")).clicked() {
                 match self.operation {
                     Operation::Read => {
-                        match parquet_examples::read_parquet_to_dataframe(&self.file_path) {
-                            Ok(df) => {
-                                self.status = format!("Loaded {} rows", df.height());
-                                self.edit_df = Some(df);
-                            }
-                            Err(e) => self.status = format!("Failed to read: {e}"),
-                        }
+                        let path = self.file_path.clone();
+                        let (tx, rx) = mpsc::channel();
+                        self.result_rx = Some(rx);
+                        self.busy = true;
+                        self.status = "Reading...".into();
+                        self.runtime.spawn(async move {
+                            let res = background::read_dataframe(path).await;
+                            let _ = tx.send(res);
+                        });
                     }
                     Operation::Modify => {
                         match parquet_examples::read_parquet_to_dataframe(&self.file_path) {
@@ -339,22 +373,23 @@ impl eframe::App for ParquetApp {
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
                             if let Some(col) = &self.partition_column {
-                                match parquet_examples::write_partitioned(df, col, &self.save_path)
-                                {
+                                match parquet_examples::write_partitioned(df, col, &self.save_path) {
                                     Ok(_) => {
-                                        self.status =
-                                            format!("Wrote partitions to {}", self.save_path)
+                                        self.status = format!("Wrote partitions to {}", self.save_path)
                                     }
                                     Err(e) => self.status = format!("Write failed: {e}"),
                                 }
                             } else {
-                                match parquet_examples::write_dataframe_to_parquet(
-                                    df,
-                                    &self.file_path,
-                                ) {
-                                    Ok(_) => self.status = format!("Wrote {}", self.file_path),
-                                    Err(e) => self.status = format!("Write failed: {e}"),
-                                }
+                                let df = df.clone();
+                                let file = self.file_path.clone();
+                                let (tx, rx) = mpsc::channel();
+                                self.result_rx = Some(rx);
+                                self.busy = true;
+                                self.status = "Writing...".into();
+                                self.runtime.spawn(async move {
+                                    let res = background::write_dataframe(df, file).await;
+                                    let _ = tx.send(res);
+                                });
                             }
                         }
                     }
