@@ -180,6 +180,53 @@ pub fn filter_by_name_prefix(path: &str, prefix: &str) -> Result<DataFrame> {
         .collect()?)
 }
 
+/// Apply a simple expression string as a filter on a Parquet file.
+///
+/// The expression must be in the form `column op value` where `op` is one of
+/// `==`, `!=`, `>`, `<`, `>=` or `<=`. Values may be numeric, boolean or
+/// quoted strings. Returns an error if the expression cannot be parsed.
+pub fn filter_with_expr(path: &str, expr: &str) -> Result<DataFrame> {
+    let filter = parse_simple_expr(expr)?;
+    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+    Ok(lf.filter(filter).collect()?)
+}
+
+fn parse_simple_expr(s: &str) -> Result<Expr> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() != 3 {
+        anyhow::bail!("expression format should be: <column> <op> <value>");
+    }
+    let column = parts[0];
+    let op = parts[1];
+    let raw_value = parts[2];
+    let value_expr = if let Ok(v) = raw_value.parse::<i64>() {
+        lit(v)
+    } else if let Ok(v) = raw_value.parse::<f64>() {
+        lit(v)
+    } else if raw_value.eq_ignore_ascii_case("true") || raw_value.eq_ignore_ascii_case("false") {
+        lit(raw_value.parse::<bool>()?)
+    } else if (raw_value.starts_with('"') && raw_value.ends_with('"'))
+        || (raw_value.starts_with('\'') && raw_value.ends_with('\''))
+    {
+        let trimmed = &raw_value[1..raw_value.len() - 1];
+        lit(trimmed)
+    } else {
+        lit(raw_value)
+    };
+
+    let col_expr = col(column);
+    let expr = match op {
+        "==" | "=" => col_expr.eq(value_expr),
+        "!=" | "<>" => col_expr.neq(value_expr),
+        ">" => col_expr.gt(value_expr),
+        "<" => col_expr.lt(value_expr),
+        ">=" => col_expr.gt_eq(value_expr),
+        "<=" => col_expr.lt_eq(value_expr),
+        _ => anyhow::bail!("unsupported operator"),
+    };
+    Ok(expr)
+}
+
 /// Retrieve low level metadata from a Parquet file using the `parquet` crate.
 ///
 /// Accessing the metadata can be useful for quickly inspecting files without
@@ -338,6 +385,19 @@ mod tests {
 
         let read = read_parquet_directory(dir.path().to_str().unwrap())?;
         assert_eq!(read.height(), df1.height() + df2.height());
+        Ok(())
+    }
+
+    #[test]
+    fn filter_with_expr_basic() -> Result<()> {
+        let dir = tempdir()?;
+        let file = dir.path().join("data.parquet");
+
+        let df = df!("id" => &[1i64, 2, 3], "val" => &[10i64, 20, 30])?;
+        write_dataframe_to_parquet(&df, file.to_str().unwrap())?;
+
+        let filtered = filter_with_expr(file.to_str().unwrap(), "id > 1")?;
+        assert_eq!(filtered.height(), 2);
         Ok(())
     }
 }
