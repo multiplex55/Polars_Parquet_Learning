@@ -70,6 +70,8 @@ struct ParquetApp {
     metadata: Option<parquet::file::metadata::ParquetMetaData>,
     /// Indicates an operation is running
     busy: bool,
+    /// Treat the selected path as a directory when reading
+    use_directory: bool,
 }
 
 impl Default for ParquetApp {
@@ -92,6 +94,7 @@ impl Default for ParquetApp {
             result_rx: None,
             metadata: None,
             busy: false,
+            use_directory: false,
         }
     }
 }
@@ -183,11 +186,17 @@ impl eframe::App for ParquetApp {
                     self.result_rx = None;
                     match res {
                         Ok(JobResult::DataFrame(df)) => {
-                            self.status = format!("Loaded {} rows", df.height());
-                            self.edit_df = Some(df);
-                            if let Ok(meta) = parquet_examples::read_parquet_metadata(&self.file_path) {
-                                self.metadata = Some(meta);
+                            if self.use_directory {
+                                self.status = format!("Combined {} rows", df.height());
+                            } else {
+                                self.status = format!("Loaded {} rows", df.height());
+                                if let Ok(meta) =
+                                    parquet_examples::read_parquet_metadata(&self.file_path)
+                                {
+                                    self.metadata = Some(meta);
+                                }
                             }
+                            self.edit_df = Some(df);
                         }
                         Ok(JobResult::Unit) => {
                             self.status = "Done".into();
@@ -211,13 +220,21 @@ impl eframe::App for ParquetApp {
                             dialog = dialog.add_filter("JSON", &["json"]);
                         }
                         _ => {
-                            dialog = dialog.add_filter("Parquet", &["parquet"]);
+                            if !self.use_directory {
+                                dialog = dialog.add_filter("Parquet", &["parquet"]);
+                            }
                         }
                     }
-                    if let Some(path) = dialog.pick_file() {
+                    let picked = if self.use_directory {
+                        dialog.pick_folder()
+                    } else {
+                        dialog.pick_file()
+                    };
+                    if let Some(path) = picked {
                         self.file_path = path.display().to_string();
                     }
                 }
+                ui.checkbox(&mut self.use_directory, "Directory");
             });
 
             // Radio buttons to pick an operation
@@ -403,12 +420,17 @@ impl eframe::App for ParquetApp {
                 match self.operation {
                     Operation::Read => {
                         let path = self.file_path.clone();
+                        let use_dir = self.use_directory;
                         let (tx, rx) = mpsc::channel();
                         self.result_rx = Some(rx);
                         self.busy = true;
                         self.status = "Reading...".into();
                         self.runtime.spawn(async move {
-                            let res = background::read_dataframe(path).await;
+                            let res = if use_dir {
+                                background::read_directory(path).await
+                            } else {
+                                background::read_dataframe(path).await
+                            };
                             let _ = tx.send(res);
                         });
                     }

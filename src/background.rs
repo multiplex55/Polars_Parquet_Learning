@@ -17,6 +17,14 @@ pub async fn read_dataframe(path: String) -> Result<JobResult> {
     Ok(JobResult::DataFrame(df))
 }
 
+/// Asynchronously read all Parquet files in a directory into a single [`DataFrame`].
+pub async fn read_directory(path: String) -> Result<JobResult> {
+    let df =
+        task::spawn_blocking(move || parquet_examples::read_parquet_directory(&path))
+            .await??;
+    Ok(JobResult::DataFrame(df))
+}
+
 /// Asynchronously write a [`DataFrame`] to Parquet.
 pub async fn write_dataframe(df: DataFrame, path: String) -> Result<JobResult> {
     task::spawn_blocking(move || parquet_examples::write_dataframe_to_parquet(&df, &path))
