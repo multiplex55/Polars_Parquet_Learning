@@ -3,9 +3,9 @@
 // Expose example functions for GUI callbacks or tests.
 pub mod parquet_examples;
 
+use anyhow::Result;
 use eframe::egui;
 use polars::prelude::*;
-use anyhow::Result;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -206,13 +206,15 @@ impl eframe::App for ParquetApp {
             if ui.button("Run").clicked() {
                 match self.operation {
                     Operation::Read => {
-                        if let Ok(df) = parquet_examples::read_parquet_to_dataframe(&self.file_path) {
+                        if let Ok(df) = parquet_examples::read_parquet_to_dataframe(&self.file_path)
+                        {
                             println!("Loaded {} rows", df.height());
                             self.edit_df = Some(df);
                         }
                     }
                     Operation::Modify => {
-                        if let Ok(df) = parquet_examples::read_parquet_to_dataframe(&self.file_path) {
+                        if let Ok(df) = parquet_examples::read_parquet_to_dataframe(&self.file_path)
+                        {
                             if let Ok(mut rec) = parquet_examples::dataframe_to_records(&df) {
                                 parquet_examples::modify_records(&mut rec);
                                 if let Ok(df) = parquet_examples::records_to_dataframe(&rec) {
@@ -223,7 +225,9 @@ impl eframe::App for ParquetApp {
                     }
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
-                            if parquet_examples::write_dataframe_to_parquet(df, &self.file_path).is_ok() {
+                            if parquet_examples::write_dataframe_to_parquet(df, &self.file_path)
+                                .is_ok()
+                            {
                                 println!("Wrote {}", self.file_path);
                             }
                         }
@@ -231,23 +235,24 @@ impl eframe::App for ParquetApp {
                     Operation::Create => {
                         if let Ok(df) = build_dataframe(&self.schema, &self.rows) {
                             if !self.save_path.is_empty() {
-                                let _ = parquet_examples::write_dataframe_to_parquet(&df, &self.save_path);
+                                let _ = parquet_examples::write_dataframe_to_parquet(
+                                    &df,
+                                    &self.save_path,
+                                );
                             }
                             self.edit_df = Some(df);
                         }
                     }
                     Operation::Partition => {
                         if let (Some(df), Some(col)) = (&self.edit_df, &self.partition_column) {
-                            if let Ok(parts) = df.partition_by([col.as_str()], true) {
-                                for (idx, part) in parts.iter().enumerate() {
-                                    let path = format!("{}_{}.parquet", self.save_path, idx);
-                                    let _ = parquet_examples::write_dataframe_to_parquet(part, &path);
-                                }
-                            }
+                            let _ = parquet_examples::write_partitioned(df, &self.save_path, col);
                         }
                     }
                     Operation::Query => {
-                        if let Ok(df) = parquet_examples::filter_by_name_prefix(&self.file_path, &self.query_prefix) {
+                        if let Ok(df) = parquet_examples::filter_by_name_prefix(
+                            &self.file_path,
+                            &self.query_prefix,
+                        ) {
                             println!("Query returned {} rows", df.height());
                             self.edit_df = Some(df);
                         }
