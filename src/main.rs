@@ -243,7 +243,7 @@ impl eframe::App for ParquetApp {
                     Operation::Create => {
                         if let Ok(df) = build_dataframe(&self.schema, &self.rows) {
                             if !self.save_path.is_empty() {
-                                let _ = parquet_examples::write_dataframe_to_parquet(
+                                let _ = parquet_examples::create_and_write_parquet(
                                     &df,
                                     &self.save_path,
                                 );

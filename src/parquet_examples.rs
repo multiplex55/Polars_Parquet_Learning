@@ -92,6 +92,14 @@ pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Convenience wrapper which writes the provided [`DataFrame`] to the given path.
+///
+/// This simply forwards to [`write_dataframe_to_parquet`].  It exists so the
+/// GUI can create a `DataFrame` and immediately persist it using a single call.
+pub fn create_and_write_parquet(df: &DataFrame, path: &str) -> Result<()> {
+    write_dataframe_to_parquet(df, path)
+}
+
 /// Build a new [`DataFrame`] from a user provided schema and row data.
 ///
 /// The `schema` slice defines column names and their [`DataType`].  `rows`
