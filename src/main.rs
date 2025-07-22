@@ -5,8 +5,8 @@ pub mod parquet_examples;
 
 use anyhow::Result;
 use eframe::egui;
-use rfd::FileDialog;
 use polars::prelude::*;
+use rfd::FileDialog;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -86,6 +86,8 @@ fn parse_dtype(t: &str) -> anyhow::Result<polars::prelude::DataType> {
     match t.to_lowercase().as_str() {
         "int" | "i64" => Ok(DataType::Int64),
         "str" | "string" => Ok(DataType::String),
+        "float" | "f64" => Ok(DataType::Float64),
+        "bool" | "boolean" => Ok(DataType::Boolean),
         _ => Err(anyhow::anyhow!("unsupported type")),
     }
 }
@@ -102,10 +104,36 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                     .collect();
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
+            DataType::Float64 => {
+                let data: Vec<f64> = rows
+                    .iter()
+                    .map(|r| {
+                        r.get(idx)
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .unwrap_or(0.0)
+                    })
+                    .collect();
+                cols.push(Series::new(name.as_str().into(), data).into_column());
+            }
             DataType::String => {
                 let data: Vec<String> = rows
                     .iter()
                     .map(|r| r.get(idx).cloned().unwrap_or_default())
+                    .collect();
+                cols.push(Series::new(name.as_str().into(), data).into_column());
+            }
+            DataType::Boolean => {
+                let data: Vec<bool> = rows
+                    .iter()
+                    .map(|r| {
+                        r.get(idx)
+                            .and_then(|s| match s.to_lowercase().as_str() {
+                                "true" | "1" => Some(true),
+                                "false" | "0" => Some(false),
+                                _ => None,
+                            })
+                            .unwrap_or(false)
+                    })
                     .collect();
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
@@ -288,7 +316,7 @@ impl eframe::App for ParquetApp {
                                 self.status = format!("Loaded {} rows", df.height());
                                 self.edit_df = Some(df);
                             }
-                            Err(e) => self.status = format!("Failed to read: {e}")
+                            Err(e) => self.status = format!("Failed to read: {e}"),
                         }
                     }
                     Operation::Modify => {
@@ -301,46 +329,56 @@ impl eframe::App for ParquetApp {
                                             self.status = "Modified records".into();
                                             self.edit_df = Some(df);
                                         }
-                                        Err(e) => self.status = format!("Failed to convert: {e}")
+                                        Err(e) => self.status = format!("Failed to convert: {e}"),
                                     }
                                 }
                             }
-                            Err(e) => self.status = format!("Failed to read: {e}")
+                            Err(e) => self.status = format!("Failed to read: {e}"),
                         }
                     }
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
                             if let Some(col) = &self.partition_column {
-                                match parquet_examples::write_partitioned(df, col, &self.save_path) {
-                                    Ok(_) => self.status = format!("Wrote partitions to {}", self.save_path),
+                                match parquet_examples::write_partitioned(df, col, &self.save_path)
+                                {
+                                    Ok(_) => {
+                                        self.status =
+                                            format!("Wrote partitions to {}", self.save_path)
+                                    }
                                     Err(e) => self.status = format!("Write failed: {e}"),
                                 }
                             } else {
-                                match parquet_examples::write_dataframe_to_parquet(df, &self.file_path) {
+                                match parquet_examples::write_dataframe_to_parquet(
+                                    df,
+                                    &self.file_path,
+                                ) {
                                     Ok(_) => self.status = format!("Wrote {}", self.file_path),
                                     Err(e) => self.status = format!("Write failed: {e}"),
                                 }
                             }
                         }
                     }
-                    Operation::Create => {
-                        match build_dataframe(&self.schema, &self.rows) {
-                            Ok(df) => {
-                                if !self.save_path.is_empty() {
-                                    match parquet_examples::create_and_write_parquet(&df, &self.save_path) {
-                                        Ok(_) => self.status = format!("Saved {}", self.save_path),
-                                        Err(e) => self.status = format!("Save failed: {e}"),
-                                    }
+                    Operation::Create => match build_dataframe(&self.schema, &self.rows) {
+                        Ok(df) => {
+                            if !self.save_path.is_empty() {
+                                match parquet_examples::create_and_write_parquet(
+                                    &df,
+                                    &self.save_path,
+                                ) {
+                                    Ok(_) => self.status = format!("Saved {}", self.save_path),
+                                    Err(e) => self.status = format!("Save failed: {e}"),
                                 }
-                                self.edit_df = Some(df);
                             }
-                            Err(e) => self.status = format!("Create failed: {e}")
+                            self.edit_df = Some(df);
                         }
-                    }
+                        Err(e) => self.status = format!("Create failed: {e}"),
+                    },
                     Operation::Partition => {
                         if let (Some(df), Some(col)) = (&self.edit_df, &self.partition_column) {
                             match parquet_examples::write_partitioned(df, col, &self.save_path) {
-                                Ok(_) => self.status = format!("Wrote partitions to {}", self.save_path),
+                                Ok(_) => {
+                                    self.status = format!("Wrote partitions to {}", self.save_path)
+                                }
                                 Err(e) => self.status = format!("Partition failed: {e}"),
                             }
                         }
@@ -354,7 +392,7 @@ impl eframe::App for ParquetApp {
                                 self.status = format!("Query returned {} rows", df.height());
                                 self.edit_df = Some(df);
                             }
-                            Err(e) => self.status = format!("Query failed: {e}")
+                            Err(e) => self.status = format!("Query failed: {e}"),
                         }
                     }
                 }
