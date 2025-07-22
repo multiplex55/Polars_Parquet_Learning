@@ -92,6 +92,22 @@ pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write a [`DataFrame`] to a CSV file.
+pub fn write_dataframe_to_csv(df: &DataFrame, path: &str) -> Result<()> {
+    let mut df = df.clone();
+    let file = File::create(path)?;
+    CsvWriter::new(file).finish(&mut df)?;
+    Ok(())
+}
+
+/// Write a [`DataFrame`] to a JSON file in line-delimited format.
+pub fn write_dataframe_to_json(df: &DataFrame, path: &str) -> Result<()> {
+    let mut df = df.clone();
+    let file = File::create(path)?;
+    JsonWriter::new(file).finish(&mut df)?;
+    Ok(())
+}
+
 /// Convenience wrapper which writes the provided [`DataFrame`] to the given path.
 ///
 /// This simply forwards to [`write_dataframe_to_parquet`].  It exists so the
@@ -398,6 +414,21 @@ mod tests {
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "id > 1")?;
         assert_eq!(filtered.height(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn write_csv_and_json() -> Result<()> {
+        let dir = tempdir()?;
+        let csv_path = dir.path().join("out.csv");
+        let json_path = dir.path().join("out.json");
+
+        let df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
+        write_dataframe_to_csv(&df, csv_path.to_str().unwrap())?;
+        write_dataframe_to_json(&df, json_path.to_str().unwrap())?;
+
+        assert!(csv_path.exists());
+        assert!(json_path.exists());
         Ok(())
     }
 }
