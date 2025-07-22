@@ -244,8 +244,42 @@ mod tests {
         let df = create_dataframe(&schema, &rows)?;
         write_partitioned(&df, part_dir.to_str().unwrap(), "name")?;
 
+        // ensure files were written for each unique key
+        let mut files: Vec<_> = std::fs::read_dir(&part_dir)?
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        files.sort();
+        assert_eq!(files, vec!["name=\"a\".parquet", "name=\"b\".parquet"]);
+
         let read = read_partitions(part_dir.to_str().unwrap())?;
         assert_eq!(read.shape(), df.shape());
+        Ok(())
+    }
+
+    #[test]
+    fn create_dataframe_correct() -> Result<()> {
+        let schema = vec![
+            ("id".to_string(), DataType::Int64),
+            ("name".to_string(), DataType::String),
+        ];
+        let rows = vec![
+            vec![AnyValue::Int64(1), AnyValue::String("a".into())],
+            vec![AnyValue::Int64(2), AnyValue::String("b".into())],
+        ];
+
+        let df = create_dataframe(&schema, &rows)?;
+        let names = df.get_column_names();
+        assert_eq!(names, vec!["id", "name"]);
+        assert_eq!(df.dtypes(), vec![DataType::Int64, DataType::String]);
+        let ids: Vec<i64> = df.column("id")?.i64()?.into_no_null_iter().collect();
+        let names_col: Vec<String> = df
+            .column("name")?
+            .str()?
+            .into_no_null_iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(ids, vec![1, 2]);
+        assert_eq!(names_col, vec!["a".to_string(), "b".to_string()]);
         Ok(())
     }
 }
