@@ -123,15 +123,14 @@ pub fn create_dataframe(
     Ok(DataFrame::new(cols)?)
 }
 
-/// Write the [`DataFrame`] partitioned by the `key` column to disk.
+/// Write the [`DataFrame`] grouped by `column` into separate Parquet files.
 ///
-/// Each unique value of `key` will result in a file named
-/// `out_dir/key=value.parquet`.
-pub fn write_partitioned(df: &DataFrame, out_dir: &str, key: &str) -> Result<()> {
-    std::fs::create_dir_all(out_dir)?;
-    for part in df.partition_by([key], true)? {
-        let value = part.column(key)?.get(0)?.to_string();
-        let file = format!("{}/{}={}.parquet", out_dir, key, value);
+/// Each distinct value of `column` is written to `dir/<value>.parquet`.
+pub fn write_partitioned(df: &DataFrame, column: &str, dir: &str) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    for part in df.partition_by([column], true)? {
+        let value = part.column(column)?.get(0)?.to_string();
+        let file = format!("{}/{}.parquet", dir.trim_end_matches('/'), value);
         write_dataframe_to_parquet(&part, &file)?;
     }
     Ok(())
@@ -250,14 +249,14 @@ mod tests {
         ];
 
         let df = create_dataframe(&schema, &rows)?;
-        write_partitioned(&df, part_dir.to_str().unwrap(), "name")?;
+        write_partitioned(&df, "name", part_dir.to_str().unwrap())?;
 
         // ensure files were written for each unique key
         let mut files: Vec<_> = std::fs::read_dir(&part_dir)?
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         files.sort();
-        assert_eq!(files, vec!["name=\"a\".parquet", "name=\"b\".parquet"]);
+        assert_eq!(files, vec!["\"a\".parquet", "\"b\".parquet"]);
 
         let read = read_partitions(part_dir.to_str().unwrap())?;
         assert_eq!(read.shape(), df.shape());
