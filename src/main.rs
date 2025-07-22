@@ -1,15 +1,15 @@
 //! Simple egui application for interacting with Parquet files.
 
 // Expose example functions for GUI callbacks or tests.
-pub mod parquet_examples;
 pub mod background;
+pub mod parquet_examples;
 
 use anyhow::Result;
+use background::JobResult;
 use eframe::egui;
 use polars::prelude::*;
 use rfd::FileDialog;
 use std::sync::mpsc;
-use background::JobResult;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -52,6 +52,8 @@ struct ParquetApp {
     partition_column: Option<String>,
     /// Query prefix when using the query operation
     query_prefix: String,
+    /// Expression string when using the query operation
+    query_expr: String,
     /// Status message shown to the user
     status: String,
     /// Number of rows to display from the current DataFrame
@@ -77,6 +79,7 @@ impl Default for ParquetApp {
             new_col_type: String::new(),
             partition_column: None,
             query_prefix: String::new(),
+            query_expr: String::new(),
             status: String::new(),
             display_rows: 5,
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
@@ -306,6 +309,10 @@ impl eframe::App for ParquetApp {
                         ui.label("Prefix:");
                         ui.text_edit_singleline(&mut self.query_prefix);
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Expr:");
+                        ui.text_edit_singleline(&mut self.query_expr);
+                    });
                 }
                 _ => {}
             }
@@ -340,7 +347,10 @@ impl eframe::App for ParquetApp {
             }
 
             // Run the selected action
-            if ui.add_enabled(!self.busy, egui::Button::new("Run")).clicked() {
+            if ui
+                .add_enabled(!self.busy, egui::Button::new("Run"))
+                .clicked()
+            {
                 match self.operation {
                     Operation::Read => {
                         let path = self.file_path.clone();
@@ -373,9 +383,11 @@ impl eframe::App for ParquetApp {
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
                             if let Some(col) = &self.partition_column {
-                                match parquet_examples::write_partitioned(df, col, &self.save_path) {
+                                match parquet_examples::write_partitioned(df, col, &self.save_path)
+                                {
                                     Ok(_) => {
-                                        self.status = format!("Wrote partitions to {}", self.save_path)
+                                        self.status =
+                                            format!("Wrote partitions to {}", self.save_path)
                                     }
                                     Err(e) => self.status = format!("Write failed: {e}"),
                                 }
@@ -419,10 +431,15 @@ impl eframe::App for ParquetApp {
                         }
                     }
                     Operation::Query => {
-                        match parquet_examples::filter_by_name_prefix(
-                            &self.file_path,
-                            &self.query_prefix,
-                        ) {
+                        let res = if !self.query_expr.is_empty() {
+                            parquet_examples::filter_with_expr(&self.file_path, &self.query_expr)
+                        } else {
+                            parquet_examples::filter_by_name_prefix(
+                                &self.file_path,
+                                &self.query_prefix,
+                            )
+                        };
+                        match res {
                             Ok(df) => {
                                 self.status = format!("Query returned {} rows", df.height());
                                 self.edit_df = Some(df);
