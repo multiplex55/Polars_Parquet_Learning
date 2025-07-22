@@ -158,6 +158,14 @@ impl eframe::App for ParquetApp {
                                 self.new_col_type.clear();
                             }
                         }
+                        if ui.button("Remove column").clicked() {
+                            if !self.schema.is_empty() {
+                                self.schema.pop();
+                                for row in &mut self.rows {
+                                    row.pop();
+                                }
+                            }
+                        }
                     });
 
                     ui.horizontal(|ui| {
