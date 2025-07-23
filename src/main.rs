@@ -108,7 +108,7 @@ impl ParquetApp {
 
 fn parse_dtype(t: &str) -> anyhow::Result<polars::prelude::DataType> {
     use polars::prelude::DataType;
-    match t.to_lowercase().as_str() {
+    match t.trim().to_lowercase().as_str() {
         "int" | "i64" => Ok(DataType::Int64),
         "str" | "string" => Ok(DataType::String),
         "float" | "f64" => Ok(DataType::Float64),
@@ -548,4 +548,15 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| Ok::<Box<dyn eframe::App>, _>(Box::new(ParquetApp::new(cc)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_dtype_handles_whitespace() {
+        let dt = parse_dtype(" int ").unwrap();
+        assert_eq!(dt, polars::prelude::DataType::Int64);
+    }
 }
