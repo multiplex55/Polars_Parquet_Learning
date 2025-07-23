@@ -146,10 +146,13 @@ pub fn write_partitioned(df: &DataFrame, column: &str, dir: &str) -> Result<()> 
     std::fs::create_dir_all(dir)?;
     for part in df.partition_by([column], true)? {
         let series = part.column(column)?;
-        let mut value = series.get(0)?.to_string();
-        if matches!(series.dtype(), DataType::String) {
-            value = value.trim_matches('"').replace(['/', '\\'], "_");
-        }
+        let av = series.get(0)?;
+        let mut value = match av {
+            AnyValue::String(s) => s.to_string(),
+            AnyValue::StringOwned(ref s) => s.to_string(),
+            _ => av.to_string(),
+        };
+        value = value.replace(['/', '\\'], "_");
         let file = format!("{}/{}.parquet", dir.trim_end_matches('/'), value);
         write_dataframe_to_parquet(&part, &file)?;
     }
