@@ -413,10 +413,18 @@ impl eframe::App for ParquetApp {
             }
 
             // Run the selected action
-            if ui
-                .add_enabled(!self.busy, egui::Button::new("Run"))
-                .clicked()
-            {
+            let requires_df = matches!(
+                self.operation,
+                Operation::Write | Operation::Partition | Operation::Query
+            );
+            let run_enabled = !self.busy && !(requires_df && self.edit_df.is_none());
+            let run_clicked = ui
+                .add_enabled(run_enabled, egui::Button::new("Run"))
+                .clicked();
+            if requires_df && self.edit_df.is_none() {
+                ui.label("Load or create a DataFrame first.");
+            }
+            if run_clicked {
                 match self.operation {
                     Operation::Read => {
                         let path = self.file_path.clone();
@@ -454,7 +462,8 @@ impl eframe::App for ParquetApp {
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
                             if let Some(col) = &self.partition_column {
-                                match parquet_examples::write_partitioned(df, col, &self.save_path) {
+                                match parquet_examples::write_partitioned(df, col, &self.save_path)
+                                {
                                     Ok(_) => {
                                         self.status =
                                             format!("Wrote partitions to {}", self.save_path)
@@ -473,6 +482,8 @@ impl eframe::App for ParquetApp {
                                     let _ = tx.send(res);
                                 });
                             }
+                        } else {
+                            self.status = "Load or create a DataFrame first.".into();
                         }
                     }
                     Operation::WriteCsv => {
@@ -514,23 +525,32 @@ impl eframe::App for ParquetApp {
                                 }
                                 Err(e) => self.status = format!("Partition failed: {e}"),
                             }
+                        } else {
+                            self.status = "Load or create a DataFrame first.".into();
                         }
                     }
                     Operation::Query => {
-                        let res = if !self.query_expr.is_empty() {
-                            parquet_examples::filter_with_expr(&self.file_path, &self.query_expr)
-                        } else {
-                            parquet_examples::filter_by_name_prefix(
-                                &self.file_path,
-                                &self.query_prefix,
-                            )
-                        };
-                        match res {
-                            Ok(df) => {
-                                self.status = format!("Query returned {} rows", df.height());
-                                self.edit_df = Some(df);
+                        if let Some(_) = &self.edit_df {
+                            let res = if !self.query_expr.is_empty() {
+                                parquet_examples::filter_with_expr(
+                                    &self.file_path,
+                                    &self.query_expr,
+                                )
+                            } else {
+                                parquet_examples::filter_by_name_prefix(
+                                    &self.file_path,
+                                    &self.query_prefix,
+                                )
+                            };
+                            match res {
+                                Ok(df) => {
+                                    self.status = format!("Query returned {} rows", df.height());
+                                    self.edit_df = Some(df);
+                                }
+                                Err(e) => self.status = format!("Query failed: {e}"),
                             }
-                            Err(e) => self.status = format!("Query failed: {e}"),
+                        } else {
+                            self.status = "Load or create a DataFrame first.".into();
                         }
                     }
                 }
