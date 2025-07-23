@@ -8,6 +8,7 @@ use anyhow::Result;
 use background::JobResult;
 use eframe::egui;
 use polars::prelude::*;
+use polars::prelude::SortMultipleOptions;
 use rfd::FileDialog;
 use std::sync::mpsc;
 
@@ -113,12 +114,15 @@ impl ParquetApp {
 }
 
 fn parse_dtype(t: &str) -> anyhow::Result<polars::prelude::DataType> {
-    use polars::prelude::DataType;
+    use polars::prelude::{DataType, TimeUnit};
     match t.trim().to_lowercase().as_str() {
         "int" | "i64" => Ok(DataType::Int64),
         "str" | "string" => Ok(DataType::String),
         "float" | "f64" => Ok(DataType::Float64),
         "bool" | "boolean" => Ok(DataType::Boolean),
+        "date" => Ok(DataType::Date),
+        "datetime" | "timestamp" => Ok(DataType::Datetime(TimeUnit::Microseconds, None)),
+        "time" => Ok(DataType::Time),
         _ => Err(anyhow::anyhow!("unsupported type")),
     }
 }
@@ -164,6 +168,57 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                                 _ => None,
                             })
                             .unwrap_or(false)
+                    })
+                    .collect();
+                cols.push(Series::new(name.as_str().into(), data).into_column());
+            }
+            DataType::Date => {
+                use chrono::NaiveDate;
+                let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                let data: Vec<i32> = rows
+                    .iter()
+                    .map(|r| {
+                        r.get(idx)
+                            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+                            .map(|d| (d - epoch).num_days() as i32)
+                            .unwrap_or(0)
+                    })
+                    .collect();
+                cols.push(Series::new(name.as_str().into(), data).into_column());
+            }
+            DataType::Datetime(_, _) => {
+                use chrono::{DateTime, NaiveDateTime, Utc};
+                let data: Vec<i64> = rows
+                    .iter()
+                    .map(|r| {
+                        r.get(idx).and_then(|s| {
+                            DateTime::parse_from_rfc3339(s)
+                                .map(|dt| dt.timestamp_micros())
+                                .or_else(|_| {
+                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                                        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+                                        .map(|dt| dt.timestamp_micros())
+                                })
+                                .ok()
+                        })
+                        .unwrap_or(0)
+                    })
+                    .collect();
+                cols.push(Series::new(name.as_str().into(), data).into_column());
+            }
+            DataType::Time => {
+                use chrono::NaiveTime;
+                use chrono::Timelike;
+                let data: Vec<i64> = rows
+                    .iter()
+                    .map(|r| {
+                        r.get(idx)
+                            .and_then(|s| NaiveTime::parse_from_str(s, "%H:%M:%S").ok())
+                            .map(|t| {
+                                (t.num_seconds_from_midnight() as i64) * 1_000_000_000
+                                    + t.nanosecond() as i64
+                            })
+                            .unwrap_or(0)
                     })
                     .collect();
                 cols.push(Series::new(name.as_str().into(), data).into_column());
@@ -397,10 +452,14 @@ impl eframe::App for ParquetApp {
                     });
                     ui.separator();
                 }
+                let names: Vec<String> = df.get_column_names().iter().map(|s| s.to_string()).collect();
+                let mut sort_after: Option<String> = None;
                 egui::ScrollArea::both().max_height(200.0).show(ui, |ui| {
                     egui::Grid::new("df_preview").striped(true).show(ui, |ui| {
-                        for name in df.get_column_names() {
-                            ui.label(name.to_string());
+                        for name in &names {
+                            if ui.button(name).clicked() {
+                                sort_after = Some(name.clone());
+                            }
                         }
                         ui.end_row();
                         let rows = df.height().min(self.display_rows);
@@ -412,6 +471,13 @@ impl eframe::App for ParquetApp {
                         }
                     });
                 });
+                if let Some(col) = sort_after {
+                    if let Some(df) = &mut self.edit_df {
+                        if let Ok(sorted) = df.sort([col.as_str()], SortMultipleOptions::default()) {
+                            *df = sorted;
+                        }
+                    }
+                }
                 if let Some(meta) = &self.metadata {
                     ui.separator();
                     ui.label("Metadata");
