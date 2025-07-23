@@ -7,6 +7,7 @@
 use anyhow::Result;
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
+use shlex;
 use std::fs::File;
 
 /// Example record used throughout the module.
@@ -211,13 +212,13 @@ pub fn filter_with_expr(path: &str, expr: &str) -> Result<DataFrame> {
 }
 
 fn parse_simple_expr(s: &str) -> Result<Expr> {
-    let parts: Vec<&str> = s.split_whitespace().collect();
+    let parts: Vec<String> = shlex::Shlex::new(s).collect();
     if parts.len() != 3 {
         anyhow::bail!("expression format should be: <column> <op> <value>");
     }
-    let column = parts[0];
-    let op = parts[1];
-    let raw_value = parts[2];
+    let column = parts[0].as_str();
+    let op = parts[1].as_str();
+    let raw_value = parts[2].as_str();
     let value_expr = if let Ok(v) = raw_value.parse::<i64>() {
         lit(v)
     } else if let Ok(v) = raw_value.parse::<f64>() {
@@ -391,6 +392,53 @@ mod tests {
     }
 
     #[test]
+    fn create_dataframe_temporal_types() -> Result<()> {
+        use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+
+        let schema = vec![
+            ("d".to_string(), DataType::Date),
+            (
+                "dt".to_string(),
+                DataType::Datetime(TimeUnit::Microseconds, None),
+            ),
+            ("t".to_string(), DataType::Time),
+        ];
+
+        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let d1 = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+        let d2 = NaiveDate::from_ymd_opt(2024, 1, 2).unwrap();
+
+        let dt1 = NaiveDateTime::new(d1, NaiveTime::from_hms_opt(12, 0, 0).unwrap());
+        let dt2 = NaiveDateTime::new(d2, NaiveTime::from_hms_opt(13, 0, 0).unwrap());
+
+        let t1 = NaiveTime::from_hms_opt(6, 0, 0).unwrap();
+        let t2 = NaiveTime::from_hms_opt(7, 0, 0).unwrap();
+
+        let rows = vec![
+            vec![
+                AnyValue::Date((d1 - epoch).num_days() as i32),
+                AnyValue::Datetime(dt1.and_utc().timestamp_micros(), TimeUnit::Microseconds, None),
+                AnyValue::Time((t1.num_seconds_from_midnight() as i64) * 1_000_000_000),
+            ],
+            vec![
+                AnyValue::Date((d2 - epoch).num_days() as i32),
+                AnyValue::Datetime(dt2.and_utc().timestamp_micros(), TimeUnit::Microseconds, None),
+                AnyValue::Time((t2.num_seconds_from_midnight() as i64) * 1_000_000_000),
+            ],
+        ];
+
+        let df = create_dataframe(&schema, &rows)?;
+        assert_eq!(df.dtypes(), vec![
+            DataType::Date,
+            DataType::Datetime(TimeUnit::Microseconds, None),
+            DataType::Time,
+        ]);
+        let dates: Vec<i32> = df.column("d")?.date()?.into_no_null_iter().collect();
+        assert_eq!(dates.len(), 2);
+        Ok(())
+    }
+
+    #[test]
     fn scan_directory_multiple_files() -> Result<()> {
         let dir = tempdir()?;
         let f1 = dir.path().join("one.parquet");
@@ -417,6 +465,19 @@ mod tests {
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "id > 1")?;
         assert_eq!(filtered.height(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn filter_with_expr_quoted_string() -> Result<()> {
+        let dir = tempdir()?;
+        let file = dir.path().join("data.parquet");
+
+        let df = df!("name" => &["John Doe", "Jane"])?;
+        write_dataframe_to_parquet(&df, file.to_str().unwrap())?;
+
+        let filtered = filter_with_expr(file.to_str().unwrap(), "name == \"John Doe\"")?;
+        assert_eq!(filtered.height(), 1);
         Ok(())
     }
 
