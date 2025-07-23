@@ -68,6 +68,10 @@ struct ParquetApp {
     result_rx: Option<std::sync::mpsc::Receiver<anyhow::Result<background::JobResult>>>,
     /// Metadata for the loaded Parquet file
     metadata: Option<parquet::file::metadata::ParquetMetaData>,
+    /// Schema of the loaded DataFrame
+    loaded_schema: Vec<(String, polars::prelude::DataType)>,
+    /// Show or hide the schema information
+    show_schema: bool,
     /// Indicates an operation is running
     busy: bool,
     /// Treat the selected path as a directory when reading
@@ -93,6 +97,8 @@ impl Default for ParquetApp {
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
             result_rx: None,
             metadata: None,
+            loaded_schema: Vec::new(),
+            show_schema: false,
             busy: false,
             use_directory: false,
         }
@@ -196,6 +202,12 @@ impl eframe::App for ParquetApp {
                                     self.metadata = Some(meta);
                                 }
                             }
+                            self.loaded_schema = df
+                                .get_column_names()
+                                .into_iter()
+                                .zip(df.dtypes())
+                                .map(|(n, t)| (n.to_string(), t))
+                                .collect();
                             self.edit_df = Some(df);
                         }
                         Ok(JobResult::Unit) => {
@@ -369,7 +381,22 @@ impl eframe::App for ParquetApp {
                 ui.horizontal(|ui| {
                     ui.label("Rows to display:");
                     ui.add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000));
+                    ui.checkbox(&mut self.show_schema, "Show schema");
                 });
+
+                if self.show_schema {
+                    egui::Grid::new("schema_grid").striped(true).show(ui, |ui| {
+                        ui.label("Column");
+                        ui.label("Type");
+                        ui.end_row();
+                        for (name, dtype) in &self.loaded_schema {
+                            ui.label(name);
+                            ui.label(format!("{:?}", dtype));
+                            ui.end_row();
+                        }
+                    });
+                    ui.separator();
+                }
                 egui::ScrollArea::both().max_height(200.0).show(ui, |ui| {
                     egui::Grid::new("df_preview").striped(true).show(ui, |ui| {
                         for name in df.get_column_names() {
@@ -450,6 +477,12 @@ impl eframe::App for ParquetApp {
                                     match parquet_examples::records_to_dataframe(&rec) {
                                         Ok(df) => {
                                             self.status = "Modified records".into();
+                                            self.loaded_schema = df
+                                                .get_column_names()
+                                                .into_iter()
+                                                .zip(df.dtypes())
+                                                .map(|(n, t)| (n.to_string(), t))
+                                                .collect();
                                             self.edit_df = Some(df);
                                         }
                                         Err(e) => self.status = format!("Failed to convert: {e}"),
@@ -513,6 +546,12 @@ impl eframe::App for ParquetApp {
                                     Err(e) => self.status = format!("Save failed: {e}"),
                                 }
                             }
+                            self.loaded_schema = df
+                                .get_column_names()
+                                .into_iter()
+                                .zip(df.dtypes())
+                                .map(|(n, t)| (n.to_string(), t))
+                                .collect();
                             self.edit_df = Some(df);
                         }
                         Err(e) => self.status = format!("Create failed: {e}"),
@@ -545,6 +584,12 @@ impl eframe::App for ParquetApp {
                             match res {
                                 Ok(df) => {
                                     self.status = format!("Query returned {} rows", df.height());
+                                    self.loaded_schema = df
+                                        .get_column_names()
+                                        .into_iter()
+                                        .zip(df.dtypes())
+                                        .map(|(n, t)| (n.to_string(), t))
+                                        .collect();
                                     self.edit_df = Some(df);
                                 }
                                 Err(e) => self.status = format!("Query failed: {e}"),
