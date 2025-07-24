@@ -54,6 +54,10 @@ button. Files can also be dragged onto the window to automatically populate the
 path. All heavy lifting is handled by Polars; the GUI simply wires the chosen
 action to the example functions.
 
+Enabling the `plotting` feature will add a simple chart viewer using
+[`egui_plot`](https://crates.io/crates/egui_plot). Select a numeric column to
+display a histogram or line plot.
+
 ## Additional examples
 
 The `parquet_examples` module includes several helper functions that showcase
