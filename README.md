@@ -62,8 +62,8 @@ action to the example functions.
 
 Enabling the `plotting` feature will add a simple chart viewer using
 [`egui_plot`](https://crates.io/crates/egui_plot). A drop-down in the preview
-panel lets you pick a numeric column then choose between a histogram or line
-plot for that data.
+panel lets you pick one or two numeric columns and choose between histogram,
+line, scatter or box plots for that data.
 
 A small statistics table summarising the loaded `DataFrame` is also shown in the
 preview panel. It lists row/column counts along with the output of
