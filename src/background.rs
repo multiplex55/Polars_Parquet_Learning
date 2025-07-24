@@ -12,16 +12,15 @@ pub enum JobResult {
 
 /// Asynchronously read a Parquet file into a [`DataFrame`].
 pub async fn read_dataframe(path: String) -> Result<JobResult> {
-    let df = task::spawn_blocking(move || parquet_examples::read_parquet_to_dataframe(&path))
-        .await??;
+    let df =
+        task::spawn_blocking(move || parquet_examples::read_parquet_to_dataframe(&path)).await??;
     Ok(JobResult::DataFrame(df))
 }
 
 /// Asynchronously read all Parquet files in a directory into a single [`DataFrame`].
 pub async fn read_directory(path: String) -> Result<JobResult> {
     let df =
-        task::spawn_blocking(move || parquet_examples::read_parquet_directory(&path))
-            .await??;
+        task::spawn_blocking(move || parquet_examples::read_parquet_directory(&path)).await??;
     Ok(JobResult::DataFrame(df))
 }
 

@@ -8,6 +8,8 @@ use anyhow::Result;
 use background::JobResult;
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
+#[cfg(feature = "plotting")]
+use egui_plot::{BarChart, Line, Plot, PlotPoints};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
 use rfd::FileDialog;
@@ -35,6 +37,20 @@ enum Operation {
 impl Default for Operation {
     fn default() -> Self {
         Operation::Read
+    }
+}
+
+#[cfg(feature = "plotting")]
+#[derive(Debug, PartialEq)]
+enum PlotType {
+    Histogram,
+    Line,
+}
+
+#[cfg(feature = "plotting")]
+impl Default for PlotType {
+    fn default() -> Self {
+        PlotType::Histogram
     }
 }
 
@@ -67,6 +83,12 @@ struct ParquetApp {
     status: String,
     /// Number of rows to display from the current DataFrame
     display_rows: usize,
+    #[cfg(feature = "plotting")]
+    /// Selected column to plot
+    plot_column: Option<String>,
+    #[cfg(feature = "plotting")]
+    /// Type of plot to display
+    plot_type: PlotType,
     /// Tokio runtime for background tasks
     runtime: tokio::runtime::Runtime,
     /// Receives results from background jobs
@@ -100,6 +122,10 @@ impl Default for ParquetApp {
             query_expr: String::new(),
             status: String::new(),
             display_rows: 5,
+            #[cfg(feature = "plotting")]
+            plot_column: None,
+            #[cfg(feature = "plotting")]
+            plot_type: PlotType::default(),
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
             result_rx: None,
             metadata: None,
@@ -341,6 +367,98 @@ impl eframe::App for ParquetApp {
                             });
                         }
                     });
+
+                #[cfg(feature = "plotting")]
+                {
+                    use polars::prelude::DataType;
+                    ui.separator();
+                    ui.label("Plot");
+                    let numeric: Vec<String> = self
+                        .loaded_schema
+                        .iter()
+                        .filter(|(_, t)| matches!(t, DataType::Int64 | DataType::Float64))
+                        .map(|(n, _)| n.clone())
+                        .collect();
+                    egui::ComboBox::from_label("Column")
+                        .selected_text(
+                            self.plot_column
+                                .as_ref()
+                                .cloned()
+                                .unwrap_or_else(|| "None".into()),
+                        )
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.plot_column, None, "None");
+                            for name in &numeric {
+                                ui.selectable_value(
+                                    &mut self.plot_column,
+                                    Some(name.clone()),
+                                    name,
+                                );
+                            }
+                        });
+                    ui.horizontal(|ui| {
+                        ui.radio_value(&mut self.plot_type, PlotType::Histogram, "Histogram");
+                        ui.radio_value(&mut self.plot_type, PlotType::Line, "Line");
+                    });
+                    if let Some(col) = &self.plot_column {
+                        if let Ok(series) = df.column(col) {
+                            let values: Vec<f64> = series
+                                .f64()
+                                .map(|ca| ca.into_no_null_iter().collect())
+                                .or_else(|_| {
+                                    series.i64().map(|ca| {
+                                        ca.into_no_null_iter().map(|v| v as f64).collect()
+                                    })
+                                })
+                                .unwrap_or_default();
+                            if !values.is_empty() {
+                                match self.plot_type {
+                                    PlotType::Histogram => {
+                                        let min =
+                                            values.iter().cloned().fold(f64::INFINITY, f64::min);
+                                        let max = values
+                                            .iter()
+                                            .cloned()
+                                            .fold(f64::NEG_INFINITY, f64::max);
+                                        let bins = 10usize;
+                                        let step = (max - min) / bins as f64;
+                                        let mut counts = vec![0f64; bins];
+                                        for v in values.iter() {
+                                            let mut idx = ((v - min) / step).floor() as usize;
+                                            if idx >= bins {
+                                                idx = bins - 1;
+                                            }
+                                            counts[idx] += 1.0;
+                                        }
+                                        let bars: Vec<_> = counts
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(i, c)| {
+                                                egui_plot::Bar::new(
+                                                    min + step * (i as f64 + 0.5),
+                                                    *c,
+                                                )
+                                            })
+                                            .collect();
+                                        Plot::new("histogram").show(ui, |plot_ui| {
+                                            plot_ui.bar_chart(BarChart::new(bars));
+                                        });
+                                    }
+                                    PlotType::Line => {
+                                        let points: PlotPoints = values
+                                            .iter()
+                                            .enumerate()
+                                            .map(|(i, v)| [i as f64, *v])
+                                            .collect();
+                                        Plot::new("line").show(ui, |plot_ui| {
+                                            plot_ui.line(Line::new(points));
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             });
 
             if let Some(col) = sort_after {
