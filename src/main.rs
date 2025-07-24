@@ -162,6 +162,16 @@ fn parse_dtype(t: &str) -> anyhow::Result<polars::prelude::DataType> {
 
 fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Result<DataFrame> {
     use polars::prelude::IntoColumn;
+    use std::collections::HashSet;
+
+    // Ensure column names are unique before building the DataFrame
+    let mut seen: HashSet<&str> = HashSet::new();
+    for (name, _) in schema {
+        if !seen.insert(name) {
+            return Err(anyhow::anyhow!("duplicate column name '{name}'"));
+        }
+    }
+
     let mut cols: Vec<Column> = Vec::new();
     for (idx, (name, dtype)) in schema.iter().enumerate() {
         match dtype {
@@ -950,5 +960,16 @@ mod tests {
         let schema = vec![("flag".to_string(), DataType::Boolean)];
         let rows = vec![vec!["notabool".to_string()]];
         assert!(build_dataframe(&schema, &rows).is_err());
+    }
+
+    #[test]
+    fn build_dataframe_returns_error_on_duplicate_names() {
+        let schema = vec![
+            ("id".to_string(), DataType::Int64),
+            ("id".to_string(), DataType::Int64),
+        ];
+        let rows = vec![vec!["1".to_string(), "2".to_string()]];
+        let err = build_dataframe(&schema, &rows).unwrap_err();
+        assert!(err.to_string().contains("duplicate column name"));
     }
 }
