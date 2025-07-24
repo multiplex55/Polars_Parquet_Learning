@@ -20,7 +20,7 @@ in `target/release/Polars_Parquet_Learning`.
 ## Example workflow
 
 1. Start the application with `cargo run`.
-2. Enter the path to a Parquet file in the **File** field.
+2. Enter the path to a Parquet file in the **File** field, or drag a file onto the window.
 3. Choose one of the available operations.
    * **Read**: load an existing file into a `DataFrame` using the lazy API.
    * **Modify**: convert rows to typed `Record`s and append `!` to each name.
@@ -50,7 +50,8 @@ The interface is implemented using
 [eframe](https://docs.rs/eframe/latest/eframe/) and
 [egui](https://docs.rs/egui/latest/egui/).  When launched a small window is
 displayed containing a text field, radio buttons for the operation and a **Run**
-button.  All heavy lifting is handled by Polars; the GUI simply wires the chosen
+button. Files can also be dragged onto the window to automatically populate the
+path. All heavy lifting is handled by Polars; the GUI simply wires the chosen
 action to the example functions.
 
 ## Additional examples
