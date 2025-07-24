@@ -650,4 +650,19 @@ mod tests {
         assert!(json_path.exists());
         Ok(())
     }
+
+    #[test]
+    fn read_csv_file() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("data.csv");
+
+        let mut df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
+        write_dataframe_to_csv(&mut df, path.to_str().unwrap())?;
+
+        let read = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some(path.to_path_buf()))?
+            .finish()?;
+        assert_eq!(read.shape(), df.shape());
+        Ok(())
+    }
 }

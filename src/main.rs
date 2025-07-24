@@ -189,8 +189,7 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                         let val = r
                             .get(idx)
                             .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
-                        val
-                            .parse::<i64>()
+                        val.parse::<i64>()
                             .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as i64: {e}"))
                     })
                     .collect::<Result<_>>()?;
@@ -260,10 +259,14 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                             .map(|dt| dt.timestamp_micros())
                             .or_else(|_| {
                                 NaiveDateTime::parse_from_str(val, "%Y-%m-%d %H:%M:%S")
-                                    .or_else(|_| NaiveDateTime::parse_from_str(val, "%Y-%m-%dT%H:%M:%S"))
+                                    .or_else(|_| {
+                                        NaiveDateTime::parse_from_str(val, "%Y-%m-%dT%H:%M:%S")
+                                    })
                                     .map(|dt| dt.timestamp_micros())
                             })
-                            .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as datetime: {e}"))?;
+                            .map_err(|e| {
+                                anyhow::anyhow!("failed to parse '{val}' as datetime: {e}")
+                            })?;
                         Ok(ts)
                     })
                     .collect::<Result<_>>()?;
@@ -280,7 +283,8 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                             .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
                         let t = NaiveTime::parse_from_str(val, "%H:%M:%S")
                             .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as time: {e}"))?;
-                        Ok((t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64)
+                        Ok((t.num_seconds_from_midnight() as i64) * 1_000_000_000
+                            + t.nanosecond() as i64)
                     })
                     .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
@@ -310,7 +314,16 @@ impl ParquetApp {
             let res = if use_dir {
                 background::read_directory(path).await
             } else {
-                background::read_dataframe(path).await
+                let ext = std::path::Path::new(&path)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                match ext.as_str() {
+                    "csv" => background::read_csv(path).await,
+                    "json" => background::read_json(path).await,
+                    _ => background::read_dataframe(path).await,
+                }
             };
             let _ = tx.send(res);
         });
@@ -550,7 +563,9 @@ impl eframe::App for ParquetApp {
                                                     .map(|ca| ca.into_no_null_iter().collect())
                                                     .or_else(|_| {
                                                         ys.i64().map(|ca| {
-                                                            ca.into_no_null_iter().map(|v| v as f64).collect()
+                                                            ca.into_no_null_iter()
+                                                                .map(|v| v as f64)
+                                                                .collect()
                                                         })
                                                     })
                                                     .unwrap_or_default();
@@ -609,11 +624,28 @@ impl eframe::App for ParquetApp {
                             if self.use_directory {
                                 self.status = format!("Combined {} rows", df.height());
                             } else {
-                                self.status = format!("Loaded {} rows", df.height());
-                                if let Ok(meta) =
-                                    parquet_examples::read_parquet_metadata(&self.file_path)
-                                {
-                                    self.metadata = Some(meta);
+                                let ext = Path::new(&self.file_path)
+                                    .extension()
+                                    .and_then(|e| e.to_str())
+                                    .unwrap_or("")
+                                    .to_ascii_lowercase();
+                                match ext.as_str() {
+                                    "csv" => {
+                                        self.status =
+                                            format!("Loaded {} rows from CSV", df.height());
+                                    }
+                                    "json" => {
+                                        self.status =
+                                            format!("Loaded {} rows from JSON", df.height());
+                                    }
+                                    _ => {
+                                        self.status = format!("Loaded {} rows", df.height());
+                                        if let Ok(meta) =
+                                            parquet_examples::read_parquet_metadata(&self.file_path)
+                                        {
+                                            self.metadata = Some(meta);
+                                        }
+                                    }
                                 }
                             }
                             self.loaded_schema = df
@@ -648,6 +680,8 @@ impl eframe::App for ParquetApp {
                         _ => {
                             if !self.use_directory {
                                 dialog = dialog.add_filter("Parquet", &["parquet"]);
+                                dialog = dialog.add_filter("CSV", &["csv"]);
+                                dialog = dialog.add_filter("JSON", &["json"]);
                             }
                         }
                     }
@@ -894,7 +928,8 @@ impl eframe::App for ParquetApp {
                     Operation::WriteCsv => {
                         if let Some(df) = &self.edit_df {
                             let mut df = df.clone();
-                            match parquet_examples::write_dataframe_to_csv(&mut df, &self.file_path) {
+                            match parquet_examples::write_dataframe_to_csv(&mut df, &self.file_path)
+                            {
                                 Ok(_) => self.status = format!("Wrote {}", self.file_path),
                                 Err(e) => self.status = format!("Write failed: {e}"),
                             }
@@ -903,7 +938,10 @@ impl eframe::App for ParquetApp {
                     Operation::WriteJson => {
                         if let Some(df) = &self.edit_df {
                             let mut df = df.clone();
-                            match parquet_examples::write_dataframe_to_json(&mut df, &self.file_path) {
+                            match parquet_examples::write_dataframe_to_json(
+                                &mut df,
+                                &self.file_path,
+                            ) {
                                 Ok(_) => self.status = format!("Wrote {}", self.file_path),
                                 Err(e) => self.status = format!("Write failed: {e}"),
                             }
