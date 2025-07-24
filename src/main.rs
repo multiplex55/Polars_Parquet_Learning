@@ -2,10 +2,12 @@
 
 // Expose example functions for GUI callbacks or tests.
 pub mod background;
+pub mod cli;
 pub mod parquet_examples;
 
 use anyhow::Result;
 use background::JobResult;
+use clap::Parser;
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 #[cfg(feature = "plotting")]
@@ -861,6 +863,14 @@ impl eframe::App for ParquetApp {
 
 /// Entry point which launches the GUI application through `eframe`.
 fn main() -> eframe::Result<()> {
+    if std::env::args().len() > 1 {
+        let cli = cli::Cli::parse();
+        if let Err(e) = cli::run(cli) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     // `eframe` sets up a native window and integrates the `egui` event loop.
     let options = eframe::NativeOptions::default();
     eframe::run_native(

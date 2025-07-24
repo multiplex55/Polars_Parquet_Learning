@@ -91,3 +91,18 @@ how to accomplish the same programmatically.
 Allowed column types are `int`/`i64`, `str`/`string`, `float`/`f64`,
 `bool`/`boolean`, `date`, `datetime` and `time`.
 
+## Command line
+
+Running the binary with additional arguments invokes a CLI instead of the GUI.
+Each subcommand mirrors one of the operations available in the application.
+
+```
+cargo run -- <SUBCOMMAND> [OPTIONS]
+```
+
+Example reading a file:
+
+```
+cargo run -- read path/to/file.parquet
+```
+
