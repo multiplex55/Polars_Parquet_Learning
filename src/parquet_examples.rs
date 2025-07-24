@@ -214,7 +214,7 @@ pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<
                 AnyValue::StringOwned(ref s) => s.to_string(),
                 _ => av.to_string(),
             };
-            value = value.replace(['/', '\\'], "_");
+            value = value.replace(['/', '\\', ':', '*', '?', '<', '>', '|'], "_");
             path.push(value);
         }
         path.set_extension("parquet");
@@ -447,6 +447,44 @@ mod tests {
         let pattern = format!("{}/a/*.parquet", part_dir.to_str().unwrap());
         let read = read_parquet_directory(&pattern)?;
         assert_eq!(read.shape(), df.shape());
+        Ok(())
+    }
+
+    #[test]
+    fn partition_sanitizes_invalid_chars() -> Result<()> {
+        let dir = tempdir()?;
+        let part_dir = dir.path().join("parts");
+
+        let schema = vec![
+            ("id".to_string(), DataType::Int64),
+            ("name".to_string(), DataType::String),
+        ];
+        let rows = vec![
+            vec![AnyValue::Int64(1), AnyValue::String("a:b".into())],
+            vec![AnyValue::Int64(2), AnyValue::String("c*d".into())],
+            vec![AnyValue::Int64(3), AnyValue::String("e?f".into())],
+            vec![AnyValue::Int64(4), AnyValue::String("<g>".into())],
+            vec![AnyValue::Int64(5), AnyValue::String("h|i".into())],
+        ];
+
+        let df = create_dataframe(&schema, &rows)?;
+        write_partitioned(&df, &["name"], part_dir.to_str().unwrap())?;
+
+        let mut files: Vec<_> = std::fs::read_dir(&part_dir)?
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        files.sort();
+
+        assert_eq!(
+            files,
+            vec![
+                "_g_.parquet",
+                "a_b.parquet",
+                "c_d.parquet",
+                "e_f.parquet",
+                "h_i.parquet",
+            ]
+        );
         Ok(())
     }
 
