@@ -65,6 +65,10 @@ Enabling the `plotting` feature will add a simple chart viewer using
 panel lets you pick a numeric column then choose between a histogram or line
 plot for that data.
 
+A small statistics table summarising the loaded `DataFrame` is also shown in the
+preview panel. It lists row/column counts along with the output of
+`DataFrame::describe` for quick inspection.
+
 ## Additional examples
 
 The `parquet_examples` module includes several helper functions that showcase

@@ -370,6 +370,48 @@ impl eframe::App for ParquetApp {
                         }
                     });
 
+                if let Ok(summary) = parquet_examples::summarize_dataframe(df) {
+                    ui.separator();
+                    ui.label("Statistics");
+                    ui.label(format!("Rows: {}", summary.rows));
+                    ui.label(format!("Columns: {}", summary.columns));
+
+                    let stat_names: Vec<String> = summary
+                        .stats
+                        .get_column_names()
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                    let mut table = TableBuilder::new(ui);
+                    for _ in &stat_names {
+                        table = table.column(TableColumn::auto());
+                    }
+                    table
+                        .striped(true)
+                        .header(18.0, |mut header| {
+                            for name in &stat_names {
+                                header.col(|ui| {
+                                    ui.label(name);
+                                });
+                            }
+                        })
+                        .body(|mut body| {
+                            for row_idx in 0..summary.stats.height() {
+                                body.row(18.0, |mut row| {
+                                    for col in summary.stats.get_columns() {
+                                        let val = col
+                                            .get(row_idx)
+                                            .map(|v| v.to_string())
+                                            .unwrap_or_default();
+                                        row.col(|ui| {
+                                            ui.label(val);
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                }
+
                 #[cfg(feature = "plotting")]
                 {
                     use polars::prelude::DataType;
