@@ -14,6 +14,12 @@ recommended.  To compile everything and launch the GUI:
 cargo run
 ```
 
+To include the optional chart viewer compile with the `plotting` feature:
+
+```bash
+cargo run --features plotting
+```
+
 For release builds use `cargo build --release` followed by the generated binary
 in `target/release/Polars_Parquet_Learning`.
 
@@ -55,8 +61,9 @@ path. All heavy lifting is handled by Polars; the GUI simply wires the chosen
 action to the example functions.
 
 Enabling the `plotting` feature will add a simple chart viewer using
-[`egui_plot`](https://crates.io/crates/egui_plot). Select a numeric column to
-display a histogram or line plot.
+[`egui_plot`](https://crates.io/crates/egui_plot). A drop-down in the preview
+panel lets you pick a numeric column then choose between a histogram or line
+plot for that data.
 
 ## Additional examples
 
