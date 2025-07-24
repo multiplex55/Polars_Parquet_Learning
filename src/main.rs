@@ -7,11 +7,12 @@ pub mod parquet_examples;
 use anyhow::Result;
 use background::JobResult;
 use eframe::egui;
-use polars::prelude::*;
+use egui_extras::{Column as TableColumn, TableBuilder};
 use polars::prelude::SortMultipleOptions;
+use polars::prelude::*;
 use rfd::FileDialog;
-use std::sync::mpsc;
 use std::path::Path;
+use std::sync::mpsc;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -192,17 +193,23 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                 let data: Vec<i64> = rows
                     .iter()
                     .map(|r| {
-                        r.get(idx).and_then(|s| {
-                            DateTime::parse_from_rfc3339(s)
-                                .map(|dt| dt.timestamp_micros())
-                                .or_else(|_| {
-                                    NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                                        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
-                                        .map(|dt| dt.timestamp_micros())
-                                })
-                                .ok()
-                        })
-                        .unwrap_or(0)
+                        r.get(idx)
+                            .and_then(|s| {
+                                DateTime::parse_from_rfc3339(s)
+                                    .map(|dt| dt.timestamp_micros())
+                                    .or_else(|_| {
+                                        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                                            .or_else(|_| {
+                                                NaiveDateTime::parse_from_str(
+                                                    s,
+                                                    "%Y-%m-%dT%H:%M:%S",
+                                                )
+                                            })
+                                            .map(|dt| dt.timestamp_micros())
+                                    })
+                                    .ok()
+                            })
+                            .unwrap_or(0)
                     })
                     .collect();
                 cols.push(Series::new(name.as_str().into(), data).into_column());
@@ -267,6 +274,76 @@ impl eframe::App for ParquetApp {
                 self.use_directory = Path::new(&self.file_path).is_dir();
                 self.operation = Operation::Read;
                 self.start_read();
+            }
+        }
+
+        if let Some(df) = &mut self.edit_df {
+            let mut sort_after: Option<String> = None;
+            egui::SidePanel::right("preview_panel").show(ctx, |ui| {
+                ui.heading("Preview");
+                ui.label(format!("Rows: {}", df.height()));
+                ui.horizontal(|ui| {
+                    ui.label("Rows to display:");
+                    ui.add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000));
+                    if ui.button("Toggle schema").clicked() {
+                        self.show_schema = !self.show_schema;
+                    }
+                });
+
+                if self.show_schema {
+                    egui::Grid::new("schema_grid").striped(true).show(ui, |ui| {
+                        ui.label("Column");
+                        ui.label("Type");
+                        ui.end_row();
+                        for (name, dtype) in &self.loaded_schema {
+                            ui.label(name);
+                            ui.label(format!("{:?}", dtype));
+                            ui.end_row();
+                        }
+                    });
+                    ui.separator();
+                }
+
+                let head = df.head(Some(self.display_rows));
+                let names: Vec<String> = head
+                    .get_column_names()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let mut table = TableBuilder::new(ui);
+                for _ in &names {
+                    table = table.column(TableColumn::auto());
+                }
+                table
+                    .striped(true)
+                    .header(20.0, |mut header| {
+                        for name in &names {
+                            header.col(|ui| {
+                                if ui.button(name).clicked() {
+                                    sort_after = Some(name.clone());
+                                }
+                            });
+                        }
+                    })
+                    .body(|mut body| {
+                        for row_idx in 0..head.height() {
+                            body.row(18.0, |mut row| {
+                                for col in head.get_columns() {
+                                    let val =
+                                        col.get(row_idx).map(|v| v.to_string()).unwrap_or_default();
+                                    row.col(|ui| {
+                                        ui.label(val);
+                                    });
+                                }
+                            });
+                        }
+                    });
+            });
+
+            if let Some(col) = sort_after {
+                if let Ok(sorted) = df.sort([col.as_str()], SortMultipleOptions::default()) {
+                    *df = sorted;
+                }
             }
         }
 
@@ -466,53 +543,7 @@ impl eframe::App for ParquetApp {
 
             if let Some(df) = &self.edit_df {
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Rows to display:");
-                    ui.add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000));
-                    ui.checkbox(&mut self.show_schema, "Show schema");
-                });
-
-                if self.show_schema {
-                    egui::Grid::new("schema_grid").striped(true).show(ui, |ui| {
-                        ui.label("Column");
-                        ui.label("Type");
-                        ui.end_row();
-                        for (name, dtype) in &self.loaded_schema {
-                            ui.label(name);
-                            ui.label(format!("{:?}", dtype));
-                            ui.end_row();
-                        }
-                    });
-                    ui.separator();
-                }
-                let names: Vec<String> = df.get_column_names().iter().map(|s| s.to_string()).collect();
-                let mut sort_after: Option<String> = None;
-                egui::ScrollArea::both().max_height(200.0).show(ui, |ui| {
-                    egui::Grid::new("df_preview").striped(true).show(ui, |ui| {
-                        for name in &names {
-                            if ui.button(name).clicked() {
-                                sort_after = Some(name.clone());
-                            }
-                        }
-                        ui.end_row();
-                        let rows = df.height().min(self.display_rows);
-                        for i in 0..rows {
-                            for s in df.get_columns() {
-                                ui.label(s.get(i).map(|v| v.to_string()).unwrap_or_default());
-                            }
-                            ui.end_row();
-                        }
-                    });
-                });
-                if let Some(col) = sort_after {
-                    if let Some(df) = &mut self.edit_df {
-                        if let Ok(sorted) = df.sort([col.as_str()], SortMultipleOptions::default()) {
-                            *df = sorted;
-                        }
-                    }
-                }
                 if let Some(meta) = &self.metadata {
-                    ui.separator();
                     ui.label("Metadata");
                     egui::Grid::new("meta_grid").striped(true).show(ui, |ui| {
                         ui.label(format!("Row groups: {}", meta.num_row_groups()));
