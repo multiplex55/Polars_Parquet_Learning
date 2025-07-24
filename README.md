@@ -26,8 +26,8 @@ in `target/release/Polars_Parquet_Learning`.
    * **Modify**: convert rows to typed `Record`s and append `!` to each name.
    * **Write**: write the current in-memory `DataFrame` back to the path in **File**.
    * **Create**: define a schema and rows in the UI then save to the **Save** path.
-   * **Partition**: split the loaded `DataFrame` by the selected column and
-     write partitions using the **Save** path as a prefix.
+   * **Partition**: split the loaded `DataFrame` by one or more columns and
+     write each combination to nested folders under the **Save** path.
    * **Query**: filter the file by a name prefix.
 4. Use the **Save** field to specify where newly created or partitioned data
    should be written.
