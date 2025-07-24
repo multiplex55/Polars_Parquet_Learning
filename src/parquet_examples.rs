@@ -97,26 +97,23 @@ pub fn records_to_dataframe(records: &[Record]) -> Result<DataFrame> {
 /// The writer takes a reference to a file handle.  Because the data is already
 /// materialised in memory this uses the eager API.  In a real application the
 /// lazy API could be used to stream results directly to disk.
-pub fn write_dataframe_to_parquet(df: &DataFrame, path: &str) -> Result<()> {
-    let mut df = df.clone();
+pub fn write_dataframe_to_parquet(df: &mut DataFrame, path: &str) -> Result<()> {
     let file = File::create(path)?;
-    ParquetWriter::new(file).finish(&mut df)?;
+    ParquetWriter::new(file).finish(df)?;
     Ok(())
 }
 
 /// Write a [`DataFrame`] to a CSV file.
-pub fn write_dataframe_to_csv(df: &DataFrame, path: &str) -> Result<()> {
-    let mut df = df.clone();
+pub fn write_dataframe_to_csv(df: &mut DataFrame, path: &str) -> Result<()> {
     let file = File::create(path)?;
-    CsvWriter::new(file).finish(&mut df)?;
+    CsvWriter::new(file).finish(df)?;
     Ok(())
 }
 
 /// Write a [`DataFrame`] to a JSON file in line-delimited format.
-pub fn write_dataframe_to_json(df: &DataFrame, path: &str) -> Result<()> {
-    let mut df = df.clone();
+pub fn write_dataframe_to_json(df: &mut DataFrame, path: &str) -> Result<()> {
     let file = File::create(path)?;
-    JsonWriter::new(file).finish(&mut df)?;
+    JsonWriter::new(file).finish(df)?;
     Ok(())
 }
 
@@ -172,7 +169,8 @@ pub fn summarize_dataframe(df: &DataFrame) -> Result<DataFrameSummary> {
 /// This simply forwards to [`write_dataframe_to_parquet`].  It exists so the
 /// GUI can create a `DataFrame` and immediately persist it using a single call.
 pub fn create_and_write_parquet(df: &DataFrame, path: &str) -> Result<()> {
-    write_dataframe_to_parquet(df, path)
+    let mut df = df.clone();
+    write_dataframe_to_parquet(&mut df, path)
 }
 
 /// Build a new [`DataFrame`] from a user provided schema and row data.
@@ -224,7 +222,8 @@ pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<
             std::fs::create_dir_all(parent)?;
         }
         let file = path.to_string_lossy().to_string();
-        write_dataframe_to_parquet(&part, &file)?;
+        let mut part = part;
+        write_dataframe_to_parquet(&mut part, &file)?;
     }
     Ok(())
 }
@@ -340,8 +339,8 @@ mod tests {
         let output_path = dir.path().join("output.parquet");
 
         // Create a small DataFrame and write it as Parquet
-        let df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
-        write_dataframe_to_parquet(&df, input_path.to_str().unwrap())?;
+        let mut df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
+        write_dataframe_to_parquet(&mut df, input_path.to_str().unwrap())?;
 
         // Read it back
         let df_read = read_parquet_to_dataframe(input_path.to_str().unwrap())?;
@@ -350,8 +349,8 @@ mod tests {
 
         // Modify then write again
         modify_records(&mut records);
-        let out_df = records_to_dataframe(&records)?;
-        write_dataframe_to_parquet(&out_df, output_path.to_str().unwrap())?;
+        let mut out_df = records_to_dataframe(&records)?;
+        write_dataframe_to_parquet(&mut out_df, output_path.to_str().unwrap())?;
 
         // Ensure written file has expected modifications
         let final_df = read_parquet_to_dataframe(output_path.to_str().unwrap())?;
@@ -365,8 +364,8 @@ mod tests {
         let dir = tempdir()?;
         let file = dir.path().join("data.parquet");
 
-        let df = df!("id" => &[1i64, 2, 3], "name" => &["alice", "bob", "anne"])?;
-        write_dataframe_to_parquet(&df, file.to_str().unwrap())?;
+        let mut df = df!("id" => &[1i64, 2, 3], "name" => &["alice", "bob", "anne"])?;
+        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
 
         // Reading only the "id" column
         let cols = read_selected_columns(file.to_str().unwrap(), &["id"])?;
@@ -562,11 +561,11 @@ mod tests {
         let f1 = dir.path().join("one.parquet");
         let f2 = dir.path().join("two.parquet");
 
-        let df1 = df!("id" => &[1i64], "name" => &["a"])?;
-        let df2 = df!("id" => &[2i64], "name" => &["b"])?;
+        let mut df1 = df!("id" => &[1i64], "name" => &["a"])?;
+        let mut df2 = df!("id" => &[2i64], "name" => &["b"])?;
 
-        write_dataframe_to_parquet(&df1, f1.to_str().unwrap())?;
-        write_dataframe_to_parquet(&df2, f2.to_str().unwrap())?;
+        write_dataframe_to_parquet(&mut df1, f1.to_str().unwrap())?;
+        write_dataframe_to_parquet(&mut df2, f2.to_str().unwrap())?;
 
         let read = read_parquet_directory(dir.path().to_str().unwrap())?;
         assert_eq!(read.height(), df1.height() + df2.height());
@@ -578,8 +577,8 @@ mod tests {
         let dir = tempdir()?;
         let file = dir.path().join("data.parquet");
 
-        let df = df!("id" => &[1i64, 2, 3], "val" => &[10i64, 20, 30])?;
-        write_dataframe_to_parquet(&df, file.to_str().unwrap())?;
+        let mut df = df!("id" => &[1i64, 2, 3], "val" => &[10i64, 20, 30])?;
+        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "id > 1")?;
         assert_eq!(filtered.height(), 2);
@@ -591,8 +590,8 @@ mod tests {
         let dir = tempdir()?;
         let file = dir.path().join("data.parquet");
 
-        let df = df!("name" => &["John Doe", "Jane"])?;
-        write_dataframe_to_parquet(&df, file.to_str().unwrap())?;
+        let mut df = df!("name" => &["John Doe", "Jane"])?;
+        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "name == \"John Doe\"")?;
         assert_eq!(filtered.height(), 1);
@@ -605,9 +604,9 @@ mod tests {
         let csv_path = dir.path().join("out.csv");
         let json_path = dir.path().join("out.json");
 
-        let df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
-        write_dataframe_to_csv(&df, csv_path.to_str().unwrap())?;
-        write_dataframe_to_json(&df, json_path.to_str().unwrap())?;
+        let mut df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
+        write_dataframe_to_csv(&mut df, csv_path.to_str().unwrap())?;
+        write_dataframe_to_json(&mut df, json_path.to_str().unwrap())?;
 
         assert!(csv_path.exists());
         assert!(json_path.exists());

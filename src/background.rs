@@ -25,8 +25,8 @@ pub async fn read_directory(path: String) -> Result<JobResult> {
 }
 
 /// Asynchronously write a [`DataFrame`] to Parquet.
-pub async fn write_dataframe(df: DataFrame, path: String) -> Result<JobResult> {
-    task::spawn_blocking(move || parquet_examples::write_dataframe_to_parquet(&df, &path))
+pub async fn write_dataframe(mut df: DataFrame, path: String) -> Result<JobResult> {
+    task::spawn_blocking(move || parquet_examples::write_dataframe_to_parquet(&mut df, &path))
         .await??;
     Ok(JobResult::Unit)
 }

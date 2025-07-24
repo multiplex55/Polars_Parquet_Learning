@@ -103,8 +103,8 @@ fn cmd_modify(file: &str) -> Result<()> {
 }
 
 fn cmd_write(input: &str, output: &str) -> Result<()> {
-    let df = parquet_examples::read_parquet_to_dataframe(input)?;
-    parquet_examples::write_dataframe_to_parquet(&df, output)?;
+    let mut df = parquet_examples::read_parquet_to_dataframe(input)?;
+    parquet_examples::write_dataframe_to_parquet(&mut df, output)?;
     println!("Wrote {output}");
     Ok(())
 }
