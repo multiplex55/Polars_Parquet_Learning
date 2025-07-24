@@ -168,19 +168,28 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
             DataType::Int64 => {
                 let data: Vec<i64> = rows
                     .iter()
-                    .map(|r| r.get(idx).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0))
-                    .collect();
+                    .map(|r| -> Result<i64> {
+                        let val = r
+                            .get(idx)
+                            .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
+                        val
+                            .parse::<i64>()
+                            .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as i64: {e}"))
+                    })
+                    .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
             DataType::Float64 => {
                 let data: Vec<f64> = rows
                     .iter()
-                    .map(|r| {
-                        r.get(idx)
-                            .and_then(|s| s.parse::<f64>().ok())
-                            .unwrap_or(0.0)
+                    .map(|r| -> Result<f64> {
+                        let val = r
+                            .get(idx)
+                            .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
+                        val.parse::<f64>()
+                            .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as f64: {e}"))
                     })
-                    .collect();
+                    .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
             DataType::String => {
@@ -193,16 +202,17 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
             DataType::Boolean => {
                 let data: Vec<bool> = rows
                     .iter()
-                    .map(|r| {
-                        r.get(idx)
-                            .and_then(|s| match s.to_lowercase().as_str() {
-                                "true" | "1" => Some(true),
-                                "false" | "0" => Some(false),
-                                _ => None,
-                            })
-                            .unwrap_or(false)
+                    .map(|r| -> Result<bool> {
+                        let val = r
+                            .get(idx)
+                            .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
+                        match val.to_lowercase().as_str() {
+                            "true" | "1" => Ok(true),
+                            "false" | "0" => Ok(false),
+                            _ => Err(anyhow::anyhow!("failed to parse '{val}' as bool")),
+                        }
                     })
-                    .collect();
+                    .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
             DataType::Date => {
@@ -210,39 +220,36 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                 let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
                 let data: Vec<i32> = rows
                     .iter()
-                    .map(|r| {
-                        r.get(idx)
-                            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
-                            .map(|d| (d - epoch).num_days() as i32)
-                            .unwrap_or(0)
+                    .map(|r| -> Result<i32> {
+                        let val = r
+                            .get(idx)
+                            .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
+                        let d = NaiveDate::parse_from_str(val, "%Y-%m-%d")
+                            .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as date: {e}"))?;
+                        Ok((d - epoch).num_days() as i32)
                     })
-                    .collect();
+                    .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
             DataType::Datetime(_, _) => {
-                use chrono::{DateTime, NaiveDateTime, Utc};
+                use chrono::{DateTime, NaiveDateTime};
                 let data: Vec<i64> = rows
                     .iter()
-                    .map(|r| {
-                        r.get(idx)
-                            .and_then(|s| {
-                                DateTime::parse_from_rfc3339(s)
+                    .map(|r| -> Result<i64> {
+                        let val = r
+                            .get(idx)
+                            .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
+                        let ts = DateTime::parse_from_rfc3339(val)
+                            .map(|dt| dt.timestamp_micros())
+                            .or_else(|_| {
+                                NaiveDateTime::parse_from_str(val, "%Y-%m-%d %H:%M:%S")
+                                    .or_else(|_| NaiveDateTime::parse_from_str(val, "%Y-%m-%dT%H:%M:%S"))
                                     .map(|dt| dt.timestamp_micros())
-                                    .or_else(|_| {
-                                        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                                            .or_else(|_| {
-                                                NaiveDateTime::parse_from_str(
-                                                    s,
-                                                    "%Y-%m-%dT%H:%M:%S",
-                                                )
-                                            })
-                                            .map(|dt| dt.timestamp_micros())
-                                    })
-                                    .ok()
                             })
-                            .unwrap_or(0)
+                            .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as datetime: {e}"))?;
+                        Ok(ts)
                     })
-                    .collect();
+                    .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
             DataType::Time => {
@@ -250,16 +257,15 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                 use chrono::Timelike;
                 let data: Vec<i64> = rows
                     .iter()
-                    .map(|r| {
-                        r.get(idx)
-                            .and_then(|s| NaiveTime::parse_from_str(s, "%H:%M:%S").ok())
-                            .map(|t| {
-                                (t.num_seconds_from_midnight() as i64) * 1_000_000_000
-                                    + t.nanosecond() as i64
-                            })
-                            .unwrap_or(0)
+                    .map(|r| -> Result<i64> {
+                        let val = r
+                            .get(idx)
+                            .ok_or_else(|| anyhow::anyhow!("missing value in column {}", name))?;
+                        let t = NaiveTime::parse_from_str(val, "%H:%M:%S")
+                            .map_err(|e| anyhow::anyhow!("failed to parse '{val}' as time: {e}"))?;
+                        Ok((t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64)
                     })
-                    .collect();
+                    .collect::<Result<_>>()?;
                 cols.push(Series::new(name.as_str().into(), data).into_column());
             }
             _ => {
@@ -930,5 +936,19 @@ mod tests {
     fn parse_dtype_handles_whitespace() {
         let dt = parse_dtype(" int ").unwrap();
         assert_eq!(dt, polars::prelude::DataType::Int64);
+    }
+
+    #[test]
+    fn build_dataframe_returns_error_on_bad_int() {
+        let schema = vec![("value".to_string(), DataType::Int64)];
+        let rows = vec![vec!["abc".to_string()]];
+        assert!(build_dataframe(&schema, &rows).is_err());
+    }
+
+    #[test]
+    fn build_dataframe_returns_error_on_bad_bool() {
+        let schema = vec![("flag".to_string(), DataType::Boolean)];
+        let rows = vec![vec!["notabool".to_string()]];
+        assert!(build_dataframe(&schema, &rows).is_err());
     }
 }
