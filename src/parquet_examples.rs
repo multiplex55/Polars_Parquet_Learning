@@ -140,21 +140,32 @@ pub fn create_dataframe(
     Ok(DataFrame::new(cols)?)
 }
 
-/// Write the [`DataFrame`] grouped by `column` into separate Parquet files.
+/// Write the [`DataFrame`] grouped by one or more columns into separate Parquet files.
 ///
-/// Each distinct value of `column` is written to `dir/<value>.parquet`.
-pub fn write_partitioned(df: &DataFrame, column: &str, dir: &str) -> Result<()> {
+/// For a single column this writes `dir/<value>.parquet`. When multiple columns
+/// are provided nested folders are created so each combination ends up at
+/// `dir/<col1>/<col2>.parquet` and so on.
+pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<()> {
+    use std::path::{Path, PathBuf};
+
     std::fs::create_dir_all(dir)?;
-    for part in df.partition_by([column], true)? {
-        let series = part.column(column)?;
-        let av = series.get(0)?;
-        let mut value = match av {
-            AnyValue::String(s) => s.to_string(),
-            AnyValue::StringOwned(ref s) => s.to_string(),
-            _ => av.to_string(),
-        };
-        value = value.replace(['/', '\\'], "_");
-        let file = format!("{}/{}.parquet", dir.trim_end_matches('/'), value);
+    for part in df.partition_by(columns.iter().copied(), true)? {
+        let mut path: PathBuf = Path::new(dir).to_path_buf();
+        for &col in columns {
+            let av = part.column(col)?.get(0)?;
+            let mut value = match av {
+                AnyValue::String(s) => s.to_string(),
+                AnyValue::StringOwned(ref s) => s.to_string(),
+                _ => av.to_string(),
+            };
+            value = value.replace(['/', '\\'], "_");
+            path.push(value);
+        }
+        path.set_extension("parquet");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let file = path.to_string_lossy().to_string();
         write_dataframe_to_parquet(&part, &file)?;
     }
     Ok(())
@@ -330,7 +341,7 @@ mod tests {
         ];
 
         let df = create_dataframe(&schema, &rows)?;
-        write_partitioned(&df, "name", part_dir.to_str().unwrap())?;
+        write_partitioned(&df, &["name"], part_dir.to_str().unwrap())?;
 
         // ensure files were written for each unique key
         let mut files: Vec<_> = std::fs::read_dir(&part_dir)?
@@ -340,6 +351,45 @@ mod tests {
         assert_eq!(files, vec!["a.parquet", "b.parquet"]);
 
         let read = read_partitions(part_dir.to_str().unwrap())?;
+        assert_eq!(read.shape(), df.shape());
+        Ok(())
+    }
+
+    #[test]
+    fn partition_round_trip_multi_cols() -> Result<()> {
+        let dir = tempdir()?;
+        let part_dir = dir.path().join("parts");
+
+        let schema = vec![
+            ("id".to_string(), DataType::Int64),
+            ("name".to_string(), DataType::String),
+            ("flag".to_string(), DataType::Boolean),
+        ];
+        let rows = vec![
+            vec![
+                AnyValue::Int64(1),
+                AnyValue::String("a".into()),
+                AnyValue::Boolean(true),
+            ],
+            vec![
+                AnyValue::Int64(2),
+                AnyValue::String("a".into()),
+                AnyValue::Boolean(false),
+            ],
+        ];
+
+        let df = create_dataframe(&schema, &rows)?;
+        write_partitioned(&df, &["name", "flag"], part_dir.to_str().unwrap())?;
+
+        let subdir = part_dir.join("a");
+        let mut files: Vec<_> = std::fs::read_dir(&subdir)?
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        files.sort();
+        assert_eq!(files, vec!["false.parquet", "true.parquet"]);
+
+        let pattern = format!("{}/a/*.parquet", part_dir.to_str().unwrap());
+        let read = read_parquet_directory(&pattern)?;
         assert_eq!(read.shape(), df.shape());
         Ok(())
     }
@@ -417,22 +467,33 @@ mod tests {
         let rows = vec![
             vec![
                 AnyValue::Date((d1 - epoch).num_days() as i32),
-                AnyValue::Datetime(dt1.and_utc().timestamp_micros(), TimeUnit::Microseconds, None),
+                AnyValue::Datetime(
+                    dt1.and_utc().timestamp_micros(),
+                    TimeUnit::Microseconds,
+                    None,
+                ),
                 AnyValue::Time((t1.num_seconds_from_midnight() as i64) * 1_000_000_000),
             ],
             vec![
                 AnyValue::Date((d2 - epoch).num_days() as i32),
-                AnyValue::Datetime(dt2.and_utc().timestamp_micros(), TimeUnit::Microseconds, None),
+                AnyValue::Datetime(
+                    dt2.and_utc().timestamp_micros(),
+                    TimeUnit::Microseconds,
+                    None,
+                ),
                 AnyValue::Time((t2.num_seconds_from_midnight() as i64) * 1_000_000_000),
             ],
         ];
 
         let df = create_dataframe(&schema, &rows)?;
-        assert_eq!(df.dtypes(), vec![
-            DataType::Date,
-            DataType::Datetime(TimeUnit::Microseconds, None),
-            DataType::Time,
-        ]);
+        assert_eq!(
+            df.dtypes(),
+            vec![
+                DataType::Date,
+                DataType::Datetime(TimeUnit::Microseconds, None),
+                DataType::Time,
+            ]
+        );
         let dates: Vec<i32> = df.column("d")?.date()?.into_no_null_iter().collect();
         assert_eq!(dates.len(), 2);
         Ok(())

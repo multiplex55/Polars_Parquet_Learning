@@ -55,8 +55,10 @@ struct ParquetApp {
     /// Temporary inputs for adding columns
     new_col_name: String,
     new_col_type: String,
-    /// Selected column when partitioning
+    /// Selected column when partitioning via write mode
     partition_column: Option<String>,
+    /// Selected columns when using the dedicated partition operation
+    partition_columns: Vec<String>,
     /// Query prefix when using the query operation
     query_prefix: String,
     /// Expression string when using the query operation
@@ -93,6 +95,7 @@ impl Default for ParquetApp {
             new_col_name: String::new(),
             new_col_type: String::new(),
             partition_column: None,
+            partition_columns: Vec::new(),
             query_prefix: String::new(),
             query_expr: String::new(),
             status: String::new(),
@@ -515,17 +518,19 @@ impl eframe::App for ParquetApp {
                 }
                 Operation::Partition => {
                     if let Some(df) = &self.edit_df {
-                        egui::ComboBox::from_label("Column")
-                            .selected_text(self.partition_column.clone().unwrap_or_default())
-                            .show_ui(ui, |ui| {
-                                for name in df.get_column_names_str() {
-                                    ui.selectable_value(
-                                        &mut self.partition_column,
-                                        Some(name.to_string()),
-                                        name,
-                                    );
+                        ui.label("Columns:");
+                        for name in df.get_column_names_str() {
+                            let mut selected = self.partition_columns.contains(&name.to_string());
+                            if ui.checkbox(&mut selected, name).changed() {
+                                if selected {
+                                    if !self.partition_columns.contains(&name.to_string()) {
+                                        self.partition_columns.push(name.to_string());
+                                    }
+                                } else {
+                                    self.partition_columns.retain(|c| c != name);
                                 }
-                            });
+                            }
+                        }
                     }
                 }
                 Operation::Query => {
@@ -612,8 +617,12 @@ impl eframe::App for ParquetApp {
                     Operation::Write => {
                         if let Some(df) = &self.edit_df {
                             if let Some(col) = &self.partition_column {
-                                match parquet_examples::write_partitioned(df, col, &self.save_path)
-                                {
+                                let cols = [col.as_str()];
+                                match parquet_examples::write_partitioned(
+                                    df,
+                                    &cols,
+                                    &self.save_path,
+                                ) {
                                     Ok(_) => {
                                         self.status =
                                             format!("Wrote partitions to {}", self.save_path)
@@ -674,12 +683,23 @@ impl eframe::App for ParquetApp {
                         Err(e) => self.status = format!("Create failed: {e}"),
                     },
                     Operation::Partition => {
-                        if let (Some(df), Some(col)) = (&self.edit_df, &self.partition_column) {
-                            match parquet_examples::write_partitioned(df, col, &self.save_path) {
-                                Ok(_) => {
-                                    self.status = format!("Wrote partitions to {}", self.save_path)
+                        if let Some(df) = &self.edit_df {
+                            if !self.partition_columns.is_empty() {
+                                let cols: Vec<&str> =
+                                    self.partition_columns.iter().map(String::as_str).collect();
+                                match parquet_examples::write_partitioned(
+                                    df,
+                                    &cols,
+                                    &self.save_path,
+                                ) {
+                                    Ok(_) => {
+                                        self.status =
+                                            format!("Wrote partitions to {}", self.save_path)
+                                    }
+                                    Err(e) => self.status = format!("Partition failed: {e}"),
                                 }
-                                Err(e) => self.status = format!("Partition failed: {e}"),
+                            } else {
+                                self.status = "Select one or more columns.".into();
                             }
                         } else {
                             self.status = "Load or create a DataFrame first.".into();
