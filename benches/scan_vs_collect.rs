@@ -6,9 +6,9 @@ use polars_parquet_learning::parquet_examples;
 fn make_dir() -> std::path::PathBuf {
     let dir = tempdir().unwrap();
     for i in 0..5 {
-        let df = df!("id" => &[i as i64], "name" => &["a"]).unwrap();
+        let mut df = df!("id" => &[i as i64], "name" => &["a"]).unwrap();
         let path = dir.path().join(format!("p{i}.parquet"));
-        parquet_examples::write_dataframe_to_parquet(&df, path.to_str().unwrap()).unwrap();
+        parquet_examples::write_dataframe_to_parquet(&mut df, path.to_str().unwrap()).unwrap();
     }
     dir.into_path()
 }

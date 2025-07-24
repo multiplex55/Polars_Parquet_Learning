@@ -893,7 +893,8 @@ impl eframe::App for ParquetApp {
                     }
                     Operation::WriteCsv => {
                         if let Some(df) = &self.edit_df {
-                            match parquet_examples::write_dataframe_to_csv(df, &self.file_path) {
+                            let mut df = df.clone();
+                            match parquet_examples::write_dataframe_to_csv(&mut df, &self.file_path) {
                                 Ok(_) => self.status = format!("Wrote {}", self.file_path),
                                 Err(e) => self.status = format!("Write failed: {e}"),
                             }
@@ -901,7 +902,8 @@ impl eframe::App for ParquetApp {
                     }
                     Operation::WriteJson => {
                         if let Some(df) = &self.edit_df {
-                            match parquet_examples::write_dataframe_to_json(df, &self.file_path) {
+                            let mut df = df.clone();
+                            match parquet_examples::write_dataframe_to_json(&mut df, &self.file_path) {
                                 Ok(_) => self.status = format!("Wrote {}", self.file_path),
                                 Err(e) => self.status = format!("Write failed: {e}"),
                             }
