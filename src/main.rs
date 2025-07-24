@@ -11,6 +11,7 @@ use polars::prelude::*;
 use polars::prelude::SortMultipleOptions;
 use rfd::FileDialog;
 use std::sync::mpsc;
+use std::path::Path;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -235,11 +236,43 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
     DataFrame::new(cols).map_err(|e| e.into())
 }
 
+impl ParquetApp {
+    /// Spawn a background task to read the current `file_path`.
+    fn start_read(&mut self) {
+        let path = self.file_path.clone();
+        let use_dir = self.use_directory;
+        let (tx, rx) = mpsc::channel();
+        self.result_rx = Some(rx);
+        self.busy = true;
+        self.status = "Reading...".into();
+        self.runtime.spawn(async move {
+            let res = if use_dir {
+                background::read_directory(path).await
+            } else {
+                background::read_dataframe(path).await
+            };
+            let _ = tx.send(res);
+        });
+    }
+}
+
 impl eframe::App for ParquetApp {
     /// Called each frame to update the UI.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Handle files dropped onto the window
+        let dropped: Vec<egui::DroppedFile> = ctx.input(|i| i.raw.dropped_files.clone());
+        if let Some(file) = dropped.first() {
+            if let Some(path) = &file.path {
+                self.file_path = path.display().to_string();
+                self.use_directory = Path::new(&self.file_path).is_dir();
+                self.operation = Operation::Read;
+                self.start_read();
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Polars Parquet Learning");
+            ui.label("Drag and drop a Parquet file to load it automatically.");
 
             if let Some(rx) = &self.result_rx {
                 if let Ok(res) = rx.try_recv() {
@@ -520,20 +553,7 @@ impl eframe::App for ParquetApp {
             if run_clicked {
                 match self.operation {
                     Operation::Read => {
-                        let path = self.file_path.clone();
-                        let use_dir = self.use_directory;
-                        let (tx, rx) = mpsc::channel();
-                        self.result_rx = Some(rx);
-                        self.busy = true;
-                        self.status = "Reading...".into();
-                        self.runtime.spawn(async move {
-                            let res = if use_dir {
-                                background::read_directory(path).await
-                            } else {
-                                background::read_dataframe(path).await
-                            };
-                            let _ = tx.send(res);
-                        });
+                        self.start_read();
                     }
                     Operation::Modify => {
                         match parquet_examples::read_parquet_to_dataframe(&self.file_path) {
