@@ -10,6 +10,17 @@ use serde::{Deserialize, Serialize};
 use shlex;
 use std::fs::File;
 
+/// Basic summary information for a [`DataFrame`].
+#[derive(Debug, Clone)]
+pub struct DataFrameSummary {
+    /// Number of rows in the frame.
+    pub rows: usize,
+    /// Number of columns in the frame.
+    pub columns: usize,
+    /// Simple statistics for each column.
+    pub stats: DataFrame,
+}
+
 /// Example record used throughout the module.
 ///
 /// In practice your schema may contain many more fields.  The struct is
@@ -107,6 +118,53 @@ pub fn write_dataframe_to_json(df: &DataFrame, path: &str) -> Result<()> {
     let file = File::create(path)?;
     JsonWriter::new(file).finish(&mut df)?;
     Ok(())
+}
+
+/// Summarise a [`DataFrame`] returning row/column counts and basic statistics.
+pub fn summarize_dataframe(df: &DataFrame) -> Result<DataFrameSummary> {
+    let mut names: Vec<String> = Vec::new();
+    let mut nulls: Vec<i64> = Vec::new();
+    let mut mins: Vec<Option<f64>> = Vec::new();
+    let mut maxs: Vec<Option<f64>> = Vec::new();
+    let mut means: Vec<Option<f64>> = Vec::new();
+
+    for col in df.get_columns() {
+        names.push(col.name().to_string());
+        nulls.push(col.null_count() as i64);
+        match col.dtype() {
+            DataType::Float64 => {
+                let ca = col.f64()?;
+                mins.push(ca.min());
+                maxs.push(ca.max());
+                means.push(ca.mean());
+            }
+            DataType::Int64 => {
+                let ca = col.i64()?;
+                mins.push(ca.min().map(|v| v as f64));
+                maxs.push(ca.max().map(|v| v as f64));
+                means.push(ca.mean());
+            }
+            _ => {
+                mins.push(None);
+                maxs.push(None);
+                means.push(None);
+            }
+        }
+    }
+
+    let stats = df!(
+        "column" => names,
+        "nulls" => nulls,
+        "min" => mins,
+        "max" => maxs,
+        "mean" => means
+    )?;
+
+    Ok(DataFrameSummary {
+        rows: df.height(),
+        columns: df.width(),
+        stats,
+    })
 }
 
 /// Convenience wrapper which writes the provided [`DataFrame`] to the given path.
