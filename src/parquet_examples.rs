@@ -232,8 +232,7 @@ pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<
 /// Read all Parquet files in a directory and concatenate them into a single [`DataFrame`].
 pub fn read_partitions(dir: &str) -> Result<DataFrame> {
     let pattern = format!("{}/*.parquet", dir.trim_end_matches('/'));
-    let lf = LazyFrame::scan_parquet(&pattern, ScanArgsParquet::default())?;
-    Ok(lf.collect()?)
+    LazyFrame::scan_parquet(&pattern, ScanArgsParquet::default())?.collect()
 }
 
 /// Read all Parquet files in a directory using a single scan.

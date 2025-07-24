@@ -80,6 +80,8 @@ common patterns:
   are collected into a `DataFrame`.
 * **`read_parquet_metadata`** – inspect low level metadata with the `parquet`
   crate without loading the entire file.
+* **`read_partitions`** – load all Parquet files from a directory pattern with a single
+  `scan_parquet` call.
 
 See [`src/parquet_examples.rs`](src/parquet_examples.rs) for implementation
 details and tests for each use case.
@@ -109,4 +111,9 @@ Example reading a file:
 ```
 cargo run -- read path/to/file.parquet
 ```
+
+## Benchmarks
+
+Running `cargo bench` builds a small benchmark comparing the old per-file
+collection approach against using `scan_parquet` over a directory pattern.
 
