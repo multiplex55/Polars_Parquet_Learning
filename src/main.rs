@@ -11,7 +11,7 @@ use clap::Parser;
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 #[cfg(feature = "plotting")]
-use egui_plot::{BarChart, Line, Plot, PlotPoints};
+use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
 use rfd::FileDialog;
@@ -47,6 +47,8 @@ impl Default for Operation {
 enum PlotType {
     Histogram,
     Line,
+    Scatter,
+    BoxPlot,
 }
 
 #[cfg(feature = "plotting")]
@@ -89,6 +91,9 @@ struct ParquetApp {
     /// Selected column to plot
     plot_column: Option<String>,
     #[cfg(feature = "plotting")]
+    /// Second column for scatter plots
+    plot_y_column: Option<String>,
+    #[cfg(feature = "plotting")]
     /// Type of plot to display
     plot_type: PlotType,
     /// Tokio runtime for background tasks
@@ -126,6 +131,8 @@ impl Default for ParquetApp {
             display_rows: 5,
             #[cfg(feature = "plotting")]
             plot_column: None,
+            #[cfg(feature = "plotting")]
+            plot_y_column: None,
             #[cfg(feature = "plotting")]
             plot_type: PlotType::default(),
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
@@ -439,7 +446,7 @@ impl eframe::App for ParquetApp {
                         .filter(|(_, t)| matches!(t, DataType::Int64 | DataType::Float64))
                         .map(|(n, _)| n.clone())
                         .collect();
-                    egui::ComboBox::from_label("Column")
+                    egui::ComboBox::from_label("X Column")
                         .selected_text(
                             self.plot_column
                                 .as_ref()
@@ -456,9 +463,30 @@ impl eframe::App for ParquetApp {
                                 );
                             }
                         });
+                    if matches!(self.plot_type, PlotType::Scatter) {
+                        egui::ComboBox::from_label("Y Column")
+                            .selected_text(
+                                self.plot_y_column
+                                    .as_ref()
+                                    .cloned()
+                                    .unwrap_or_else(|| "None".into()),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.plot_y_column, None, "None");
+                                for name in &numeric {
+                                    ui.selectable_value(
+                                        &mut self.plot_y_column,
+                                        Some(name.clone()),
+                                        name,
+                                    );
+                                }
+                            });
+                    }
                     ui.horizontal(|ui| {
                         ui.radio_value(&mut self.plot_type, PlotType::Histogram, "Histogram");
                         ui.radio_value(&mut self.plot_type, PlotType::Line, "Line");
+                        ui.radio_value(&mut self.plot_type, PlotType::Scatter, "Scatter");
+                        ui.radio_value(&mut self.plot_type, PlotType::BoxPlot, "Box");
                     });
                     if let Some(col) = &self.plot_column {
                         if let Ok(series) = df.column(col) {
@@ -513,6 +541,46 @@ impl eframe::App for ParquetApp {
                                         Plot::new("line").show(ui, |plot_ui| {
                                             plot_ui.line(Line::new(points));
                                         });
+                                    }
+                                    PlotType::Scatter => {
+                                        if let Some(ycol) = &self.plot_y_column {
+                                            if let Ok(ys) = df.column(ycol) {
+                                                let y_vals: Vec<f64> = ys
+                                                    .f64()
+                                                    .map(|ca| ca.into_no_null_iter().collect())
+                                                    .or_else(|_| {
+                                                        ys.i64().map(|ca| {
+                                                            ca.into_no_null_iter().map(|v| v as f64).collect()
+                                                        })
+                                                    })
+                                                    .unwrap_or_default();
+                                                let points: PlotPoints = values
+                                                    .iter()
+                                                    .cloned()
+                                                    .zip(y_vals)
+                                                    .map(|(x, y)| [x, y])
+                                                    .collect();
+                                                Plot::new("scatter").show(ui, |plot_ui| {
+                                                    plot_ui.points(egui_plot::Points::new(points));
+                                                });
+                                            }
+                                        }
+                                    }
+                                    PlotType::BoxPlot => {
+                                        use egui_plot::{BoxElem, BoxPlot};
+                                        if !values.is_empty() {
+                                            let mut sorted = values.clone();
+                                            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                                            let q1 = sorted[(sorted.len() as f64 * 0.25) as usize];
+                                            let q2 = sorted[(sorted.len() as f64 * 0.5) as usize];
+                                            let q3 = sorted[(sorted.len() as f64 * 0.75) as usize];
+                                            let min = *sorted.first().unwrap();
+                                            let max = *sorted.last().unwrap();
+                                            let elem = BoxElem::new(0.0, q1, q2, q3, min, max);
+                                            Plot::new("boxplot").show(ui, |plot_ui| {
+                                                plot_ui.box_plot(BoxPlot::new(vec![elem]));
+                                            });
+                                        }
                                     }
                                 }
                             }
