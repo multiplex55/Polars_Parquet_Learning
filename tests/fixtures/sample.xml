@@ -1,0 +1,11 @@
+<root>
+    <template id='1' name='temp'>
+        <field name='f1' value='v1'/>
+        <field name='f2' value='v2'/>
+    </template>
+    <message id='10' template_id='1'>
+        <part content='a'/>
+        <part content='b'/>
+    </message>
+    <repository id='100' path='/tmp'/>
+</root>
