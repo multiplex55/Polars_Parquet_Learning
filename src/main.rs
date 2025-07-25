@@ -547,7 +547,7 @@ impl eframe::App for ParquetApp {
                                             })
                                             .collect();
                                         Plot::new("histogram").show(ui, |plot_ui| {
-                                            plot_ui.bar_chart(BarChart::new(bars));
+                                            plot_ui.bar_chart(BarChart::new("", bars));
                                         });
                                     }
                                     PlotType::Line => {
@@ -557,7 +557,7 @@ impl eframe::App for ParquetApp {
                                             .map(|(i, v)| [i as f64, *v])
                                             .collect();
                                         Plot::new("line").show(ui, |plot_ui| {
-                                            plot_ui.line(Line::new(points));
+                                            plot_ui.line(Line::new("", points));
                                         });
                                     }
                                     PlotType::Scatter => {
@@ -581,7 +581,7 @@ impl eframe::App for ParquetApp {
                                                     .map(|(x, y)| [x, y])
                                                     .collect();
                                                 Plot::new("scatter").show(ui, |plot_ui| {
-                                                    plot_ui.points(egui_plot::Points::new(points));
+                                                    plot_ui.points(egui_plot::Points::new("", points));
                                                 });
                                             }
                                         }
@@ -596,9 +596,10 @@ impl eframe::App for ParquetApp {
                                             let q3 = sorted[(sorted.len() as f64 * 0.75) as usize];
                                             let min = *sorted.first().unwrap();
                                             let max = *sorted.last().unwrap();
-                                            let elem = BoxElem::new(0.0, q1, q2, q3, min, max);
+                                            let spread = egui_plot::BoxSpread::new(min, q1, q2, q3, max);
+                                            let elem = BoxElem::new(0.0, spread);
                                             Plot::new("boxplot").show(ui, |plot_ui| {
-                                                plot_ui.box_plot(BoxPlot::new(vec![elem]));
+                                                plot_ui.box_plot(BoxPlot::new("", vec![elem]));
                                             });
                                         }
                                     }
