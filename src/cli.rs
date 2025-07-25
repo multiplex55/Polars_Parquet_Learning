@@ -1,5 +1,6 @@
 use crate::parquet_examples;
 use anyhow::Result;
+use crate::xml_to_parquet;
 use clap::{Args, Parser, Subcommand};
 
 /// Top level command line arguments
@@ -24,6 +25,8 @@ pub enum Commands {
     Partition(PartitionArgs),
     /// Query rows by prefix or expression
     Query(QueryArgs),
+    /// Convert an XML file to Parquet tables
+    Xml(XmlArgs),
 }
 
 #[derive(Args)]
@@ -73,6 +76,17 @@ pub struct QueryArgs {
     #[arg(long)]
     pub expr: Option<String>,
 }
+#[derive(Args)]
+pub struct XmlArgs {
+    /// Input XML file
+    pub input: String,
+    /// Directory for Parquet tables
+    pub output_dir: String,
+    /// Write _schema.json
+    #[arg(long)]
+    pub schema: bool,
+}
+
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
@@ -81,6 +95,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Write(args) => cmd_write(&args.input, &args.output),
         Commands::Create(args) => cmd_create(&args.output),
         Commands::Partition(args) => cmd_partition(&args.input, &args.column, &args.dir),
+        Commands::Xml(args) => cmd_xml(&args),
         Commands::Query(args) => {
             cmd_query(&args.input, args.prefix.as_deref(), args.expr.as_deref())
         }
@@ -123,6 +138,12 @@ fn cmd_partition(input: &str, column: &str, dir: &str) -> Result<()> {
     println!("Wrote partitions to {dir}");
     Ok(())
 }
+fn cmd_xml(args: &XmlArgs) -> Result<()> {
+    xml_to_parquet::xml_to_parquet(&args.input, &args.output_dir, args.schema)?;
+    println!("Wrote Parquet tables to {}", args.output_dir);
+    Ok(())
+}
+
 
 fn cmd_query(input: &str, prefix: Option<&str>, expr: Option<&str>) -> Result<()> {
     let df = if let Some(expr) = expr {

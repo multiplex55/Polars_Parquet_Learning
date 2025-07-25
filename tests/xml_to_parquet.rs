@@ -33,7 +33,7 @@ fn xml_round_trip() -> anyhow::Result<()> {
     assert_eq!(templates.column("id")?.u32()?.get(0), Some(1));
 
     let output_dir = dir.path().join("out");
-    write_tables(&tables, output_dir.to_str().unwrap())?;
+    write_tables(&tables, output_dir.to_str().unwrap(), true)?;
     assert!(output_dir.join("templates.parquet").exists());
     assert!(output_dir.join("_schema.json").exists());
     Ok(())

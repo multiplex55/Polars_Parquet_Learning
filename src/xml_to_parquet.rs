@@ -129,7 +129,7 @@ struct ExportSchema {
     foreign_keys: Vec<ForeignKey>,
 }
 
-pub fn write_tables(tables: &BTreeMap<&str, DataFrame>, output_dir: &str) -> Result<()> {
+pub fn write_tables(tables: &BTreeMap<&str, DataFrame>, output_dir: &str, write_schema: bool) -> Result<()> {
     use std::fs::File;
     use std::path::Path;
     std::fs::create_dir_all(output_dir)?;
@@ -157,7 +157,7 @@ pub fn write_tables(tables: &BTreeMap<&str, DataFrame>, output_dir: &str) -> Res
         ParquetWriter::new(file).finish(&mut df)?;
     }
 
-    if !fks.is_empty() {
+    if write_schema && !fks.is_empty() {
         let schema = ExportSchema { foreign_keys: fks };
         let path = Path::new(output_dir).join("_schema.json");
         let file = File::create(path)?;
@@ -165,3 +165,10 @@ pub fn write_tables(tables: &BTreeMap<&str, DataFrame>, output_dir: &str) -> Res
     }
     Ok(())
 }
+
+pub fn xml_to_parquet(input: &str, output_dir: &str, write_schema: bool) -> Result<()> {
+    let root = parse_xml(input)?;
+    let tables = flatten_to_tables(&root)?;
+    write_tables(&tables, output_dir, write_schema)
+}
+
