@@ -117,3 +117,27 @@ cargo run -- read path/to/file.parquet
 Running `cargo bench` builds a small benchmark comparing the old per-file
 collection approach against using `scan_parquet` over a directory pattern.
 
+## Converting XML to normalized Parquet tables
+
+The CLI can also transform a small hierarchical XML format into multiple
+normalized Parquet tables. The input must contain a `<root>` element with any
+combination of `<template>`, `<message>` and `<repository>` children. Templates
+may include nested `<field>` elements while messages can contain one or more
+`<part>` nodes.
+
+Use the following command to perform the conversion:
+
+```
+cargo run -- xml <input.xml> <output_dir> [--schema]
+```
+
+Each entity is written to `<output_dir>` as its own file (for example
+`templates.parquet`, `fields.parquet`, `messages.parquet`, `parts.parquet` and
+`repositories.parquet`). Foreign key columns follow the `<table>_id` naming
+convention and an optional `_schema.json` lists these relationships when the
+`--schema` flag is supplied.
+
+Programmatic access is provided by the [`xml_to_parquet`](src/xml_to_parquet.rs)
+module which exposes `parse_xml`, `flatten_to_tables`, `write_tables` and the
+convenience `xml_to_parquet` function.
+
