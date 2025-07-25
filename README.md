@@ -141,3 +141,7 @@ Programmatic access is provided by the [`xml_to_parquet`](src/xml_to_parquet.rs)
 module which exposes `parse_xml`, `flatten_to_tables`, `write_tables` and the
 convenience `xml_to_parquet` function.
 
+The GUI offers the same functionality via the **XML** mode. Select an input
+file in the **File** field, choose an output directory in **Save** and decide
+whether to write a `_schema.json` using the checkbox before clicking **Run**.
+
