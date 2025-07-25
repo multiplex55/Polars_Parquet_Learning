@@ -1,6 +1,6 @@
 use crate::parquet_examples;
 use anyhow::Result;
-use Polars_Parquet_Learning::xml_to_parquet;
+use crate::xml_to_parquet;
 use clap::{Args, Parser, Subcommand};
 
 /// Top level command line arguments

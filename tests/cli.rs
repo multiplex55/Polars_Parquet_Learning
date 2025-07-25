@@ -1,6 +1,6 @@
 use polars::prelude::*;
 use std::fs::File;
-use std::process::Command;
+use Polars_Parquet_Learning::cli::{self, Cli, Commands, ReadArgs, XmlArgs};
 use tempfile::tempdir;
 
 #[test]
@@ -12,12 +12,12 @@ fn cli_read_runs() {
         .finish(&mut df)
         .unwrap();
 
-    let exe = env!("CARGO_BIN_EXE_Polars_Parquet_Learning");
-    let status = Command::new(exe)
-        .args(["read", file.to_str().unwrap()])
-        .status()
-        .expect("run");
-    assert!(status.success());
+    let cli = Cli {
+        command: Commands::Read(ReadArgs {
+            file: file.to_str().unwrap().to_string(),
+        }),
+    };
+    cli::run(cli).unwrap();
 }
 
 #[test]
@@ -25,17 +25,14 @@ fn cli_xml_creates_files() {
     let dir = tempdir().unwrap();
     let xml_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.xml");
     let out_dir = dir.path().join("out");
-    let exe = env!("CARGO_BIN_EXE_Polars_Parquet_Learning");
-    let status = Command::new(exe)
-        .args([
-            "xml",
-            xml_path,
-            out_dir.to_str().unwrap(),
-            "--schema",
-        ])
-        .status()
-        .expect("run");
-    assert!(status.success());
+    let cli = Cli {
+        command: Commands::Xml(XmlArgs {
+            input: xml_path.to_string(),
+            output_dir: out_dir.to_str().unwrap().to_string(),
+            schema: true,
+        }),
+    };
+    cli::run(cli).unwrap();
     assert!(out_dir.join("templates.parquet").exists());
     assert!(out_dir.join("messages.parquet").exists());
 }
