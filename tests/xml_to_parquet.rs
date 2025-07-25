@@ -6,22 +6,9 @@ use Polars_Parquet_Learning::xml_to_parquet::{flatten_to_tables, parse_xml, writ
 #[test]
 fn xml_round_trip() -> anyhow::Result<()> {
     let dir = tempdir()?;
-    let xml_path = dir.path().join("sample.xml");
-    std::fs::write(
-        &xml_path,
-        r#"<root>
-    <template id='1' name='temp'>
-        <field name='f1' value='v1'/>
-    </template>
-    <message id='10' template_id='1'>
-        <part content='a'/>
-        <part content='b'/>
-    </message>
-    <repository id='100' path='/tmp'/>
-</root>"#,
-    )?;
+    let xml_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.xml");
 
-    let root = parse_xml(xml_path.to_str().unwrap())?;
+    let root = parse_xml(xml_path)?;
     let tables = flatten_to_tables(&root)?;
     assert!(tables.contains_key("templates"));
     assert!(tables.contains_key("fields"));
