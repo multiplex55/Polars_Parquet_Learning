@@ -34,6 +34,8 @@ enum Operation {
     Partition,
     /// Run a simple query against the file
     Query,
+    /// Convert an XML file to Parquet tables
+    Xml,
 }
 
 impl Default for Operation {
@@ -110,6 +112,8 @@ struct ParquetApp {
     busy: bool,
     /// Treat the selected path as a directory when reading
     use_directory: bool,
+    /// Write an additional _schema.json when converting XML
+    xml_schema: bool,
 }
 
 impl Default for ParquetApp {
@@ -142,6 +146,7 @@ impl Default for ParquetApp {
             show_schema: false,
             busy: false,
             use_directory: false,
+            xml_schema: false,
         }
     }
 }
@@ -677,6 +682,9 @@ impl eframe::App for ParquetApp {
                         Operation::WriteJson => {
                             dialog = dialog.add_filter("JSON", &["json"]);
                         }
+                        Operation::Xml => {
+                            dialog = dialog.add_filter("XML", &["xml"]);
+                        }
                         _ => {
                             if !self.use_directory {
                                 dialog = dialog.add_filter("Parquet", &["parquet"]);
@@ -685,7 +693,7 @@ impl eframe::App for ParquetApp {
                             }
                         }
                     }
-                    let picked = if self.use_directory {
+                    let picked = if self.use_directory && self.operation != Operation::Xml {
                         dialog.pick_folder()
                     } else {
                         dialog.pick_file()
@@ -708,6 +716,7 @@ impl eframe::App for ParquetApp {
                 ui.radio_value(&mut self.operation, Operation::Create, "Create");
                 ui.radio_value(&mut self.operation, Operation::Partition, "Partition");
                 ui.radio_value(&mut self.operation, Operation::Query, "Query");
+                ui.radio_value(&mut self.operation, Operation::Xml, "XML");
             });
 
             ui.horizontal(|ui| {
@@ -722,11 +731,17 @@ impl eframe::App for ParquetApp {
                         Operation::WriteJson => {
                             dialog = dialog.add_filter("JSON", &["json"]);
                         }
+                        Operation::Xml => {}
                         _ => {
                             dialog = dialog.add_filter("Parquet", &["parquet"]);
                         }
                     }
-                    if let Some(path) = dialog.save_file() {
+                    let picked = if self.operation == Operation::Xml {
+                        dialog.pick_folder()
+                    } else {
+                        dialog.save_file()
+                    };
+                    if let Some(path) = picked {
                         self.save_path = path.display().to_string();
                     }
                 }
@@ -822,6 +837,9 @@ impl eframe::App for ParquetApp {
                         ui.label("Expr:");
                         ui.text_edit_singleline(&mut self.query_expr);
                     });
+                }
+                Operation::Xml => {
+                    ui.checkbox(&mut self.xml_schema, "Write _schema.json");
                 }
                 _ => {}
             }
@@ -1019,6 +1037,19 @@ impl eframe::App for ParquetApp {
                             }
                         } else {
                             self.status = "Load or create a DataFrame first.".into();
+                        }
+                    }
+                    Operation::Xml => {
+                        match Polars_Parquet_Learning::xml_to_parquet::xml_to_parquet(
+                            &self.file_path,
+                            &self.save_path,
+                            self.xml_schema,
+                        ) {
+                            Ok(_) => {
+                                self.status =
+                                    format!("Wrote Parquet tables to {}", self.save_path);
+                            }
+                            Err(e) => self.status = format!("XML conversion failed: {e}"),
                         }
                     }
                 }
