@@ -59,3 +59,10 @@ pub async fn write_dataframe(mut df: DataFrame, path: String) -> Result<JobResul
         .await??;
     Ok(JobResult::Unit)
 }
+
+/// Asynchronously filter a Parquet file by multiple expressions.
+pub async fn filter_with_exprs(path: String, exprs: Vec<String>) -> Result<JobResult> {
+    let df = task::spawn_blocking(move || parquet_examples::filter_with_exprs(&path, &exprs))
+        .await??;
+    Ok(JobResult::DataFrame(df))
+}

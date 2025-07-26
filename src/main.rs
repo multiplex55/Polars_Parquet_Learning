@@ -17,6 +17,7 @@ use polars::prelude::*;
 use rfd::FileDialog;
 use std::path::Path;
 use std::sync::mpsc;
+use std::collections::HashMap;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -60,6 +61,19 @@ impl Default for PlotType {
     }
 }
 
+#[derive(Default, Clone, Copy, PartialEq)]
+enum FilterOp {
+    #[default]
+    Equals,
+    Contains,
+}
+
+#[derive(Default, Clone)]
+struct ColumnFilter {
+    op: FilterOp,
+    value: String,
+}
+
 /// Main application state.
 struct ParquetApp {
     /// Path to the Parquet file entered by the user.
@@ -85,6 +99,8 @@ struct ParquetApp {
     query_prefix: String,
     /// Expression string when using the query operation
     query_expr: String,
+    /// Per-column filters
+    column_filters: std::collections::HashMap<String, ColumnFilter>,
     /// Status message shown to the user
     status: String,
     /// Number of rows to display from the current DataFrame
@@ -137,6 +153,7 @@ impl Default for ParquetApp {
             partition_columns: Vec::new(),
             query_prefix: String::new(),
             query_expr: String::new(),
+            column_filters: std::collections::HashMap::new(),
             status: String::new(),
             display_rows: 5,
             page_start: 0,
@@ -362,6 +379,40 @@ impl ParquetApp {
         self.status = "Reading...".into();
         self.runtime.spawn(async move {
             let res = background::read_dataframe_slice(path, start, len).await;
+            let _ = tx.send(res);
+        });
+    }
+
+    /// Apply all column filters and reload the file.
+    fn apply_filters(&mut self) {
+        let path = self.file_path.clone();
+        let len = self.page_size;
+        let exprs: Vec<String> = self
+            .column_filters
+            .iter()
+            .filter_map(|(name, f)| {
+                if f.value.trim().is_empty() {
+                    None
+                } else {
+                    let op = match f.op {
+                        FilterOp::Equals => "==",
+                        FilterOp::Contains => "contains",
+                    };
+                    Some(format!("{} {} \"{}\"", name, op, f.value))
+                }
+            })
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        self.result_rx = Some(rx);
+        self.busy = true;
+        self.page_start = 0;
+        self.status = "Filtering...".into();
+        self.runtime.spawn(async move {
+            let res = if exprs.is_empty() {
+                background::read_dataframe_slice(path, 0, len).await
+            } else {
+                background::filter_with_exprs(path, exprs).await
+            };
             let _ = tx.send(res);
         });
     }
@@ -682,7 +733,10 @@ impl eframe::App for ParquetApp {
                         self.result_rx = None;
                         match res {
                             Ok(JobResult::DataFrame(df)) => {
-                                if self.use_directory {
+                                if self.status.starts_with("Filtering") {
+                                    self.total_rows = df.height();
+                                    self.status = format!("Filtered to {} rows", df.height());
+                                } else if self.use_directory {
                                     self.total_rows = df.height();
                                     self.status = format!("Combined {} rows", df.height());
                                 } else {
@@ -719,6 +773,11 @@ impl eframe::App for ParquetApp {
                                     .into_iter()
                                     .zip(df.dtypes())
                                     .map(|(n, t)| (n.to_string(), t))
+                                    .collect();
+                                self.column_filters = self
+                                    .loaded_schema
+                                    .iter()
+                                    .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                     .collect();
                                 self.edit_df = Some(df);
                             }
@@ -905,6 +964,28 @@ impl eframe::App for ParquetApp {
                         ui.label("Expr:");
                         ui.text_edit_singleline(&mut self.query_expr);
                     });
+                    ui.separator();
+                    ui.label("Column filters:");
+                    let mut changed = false;
+                    for (name, _) in &self.loaded_schema {
+                        let filter = self.column_filters.entry(name.clone()).or_default();
+                        ui.horizontal(|ui| {
+                            ui.label(name);
+                            egui::ComboBox::from_id_source(format!("op_{name}"))
+                                .selected_text(match filter.op {
+                                    FilterOp::Equals => "=",
+                                    FilterOp::Contains => "contains",
+                                })
+                                .show_ui(ui, |ui| {
+                                    changed |= ui.selectable_value(&mut filter.op, FilterOp::Equals, "=").changed();
+                                    changed |= ui.selectable_value(&mut filter.op, FilterOp::Contains, "contains").changed();
+                                });
+                            changed |= ui.text_edit_singleline(&mut filter.value).changed();
+                        });
+                    }
+                    if changed && !self.busy {
+                        self.apply_filters();
+                    }
                 }
                 Operation::Xml => {
                     ui.checkbox(&mut self.xml_schema, "Write _schema.json");
@@ -970,6 +1051,11 @@ impl eframe::App for ParquetApp {
                                                 .into_iter()
                                                 .zip(df.dtypes())
                                                 .map(|(n, t)| (n.to_string(), t))
+                                                .collect();
+                                            self.column_filters = self
+                                                .loaded_schema
+                                                .iter()
+                                                .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                                 .collect();
                                             self.edit_df = Some(df);
                                         }
@@ -1050,6 +1136,11 @@ impl eframe::App for ParquetApp {
                                 .zip(df.dtypes())
                                 .map(|(n, t)| (n.to_string(), t))
                                 .collect();
+                            self.column_filters = self
+                                .loaded_schema
+                                .iter()
+                                .map(|(n, _)| (n.clone(), ColumnFilter::default()))
+                                .collect();
                             self.edit_df = Some(df);
                         }
                         Err(e) => self.status = format!("Create failed: {e}"),
@@ -1098,6 +1189,11 @@ impl eframe::App for ParquetApp {
                                         .into_iter()
                                         .zip(df.dtypes())
                                         .map(|(n, t)| (n.to_string(), t))
+                                        .collect();
+                                    self.column_filters = self
+                                        .loaded_schema
+                                        .iter()
+                                        .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                         .collect();
                                     self.edit_df = Some(df);
                                 }
