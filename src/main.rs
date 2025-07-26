@@ -18,6 +18,7 @@ use rfd::FileDialog;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::mpsc;
+use crate::search;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -159,6 +160,12 @@ struct ParquetApp {
     use_directory: bool,
     /// Write an additional _schema.json when converting XML
     xml_schema: bool,
+    /// Current search text for highlighting cells
+    search_text: String,
+    /// Coordinates of matches in the current page
+    search_matches: Vec<(usize, usize)>,
+    /// Index of the active match
+    search_index: usize,
 }
 
 impl Default for ParquetApp {
@@ -209,6 +216,9 @@ impl Default for ParquetApp {
             progress: None,
             use_directory: false,
             xml_schema: false,
+            search_text: String::new(),
+            search_matches: Vec::new(),
+            search_index: 0,
         }
     }
 }
@@ -570,6 +580,25 @@ impl ParquetApp {
             .iter()
             .map(|s| s.to_string())
             .collect();
+        self.update_search_matches();
+    }
+
+    fn update_search_matches(&mut self) {
+        self.search_matches.clear();
+        if self.search_text.is_empty() {
+            return;
+        }
+        let row_limit = self.display_rows.min(self.rows.len());
+        for r in 0..row_limit {
+            for (c, cell) in self.rows[r].iter().enumerate() {
+                if cell.contains(&self.search_text) {
+                    self.search_matches.push((r, c));
+                }
+            }
+        }
+        if self.search_index >= self.search_matches.len() {
+            self.search_index = 0;
+        }
     }
 }
 
@@ -598,6 +627,23 @@ impl eframe::App for ParquetApp {
                     end,
                     self.total_rows
                 ));
+                ui.horizontal(|ui| {
+                    ui.label("Search:");
+                    let changed = ui.text_edit_singleline(&mut self.search_text).changed();
+                    if changed {
+                        self.search_index = 0;
+                        self.update_search_matches();
+                    }
+                    if !self.search_matches.is_empty() {
+                        if ui.button("Previous").clicked() {
+                            self.search_index = search::prev_index(self.search_index, &self.search_matches);
+                        }
+                        if ui.button("Next").clicked() {
+                            self.search_index = search::next_index(self.search_index, &self.search_matches);
+                        }
+                        ui.label(format!("{}/{}", self.search_index + 1, self.search_matches.len()));
+                    }
+                });
                 if self.total_rows > self.page_size {
                     ui.horizontal(|ui| {
                         if ui.button("Previous").clicked() && self.page_start >= self.page_size {
@@ -623,7 +669,12 @@ impl eframe::App for ParquetApp {
                 });
                 ui.horizontal(|ui| {
                     ui.label("Rows to display:");
-                    ui.add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000));
+                    if ui
+                        .add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000))
+                        .changed()
+                    {
+                        self.update_search_matches();
+                    }
                     if ui.button("Toggle schema").clicked() {
                         self.show_schema = !self.show_schema;
                     }
@@ -670,7 +721,11 @@ impl eframe::App for ParquetApp {
                                 for (col_idx, col) in df.get_columns().iter().enumerate() {
                                     let dtype = col.dtype();
                                     let cell = &mut self.rows[row_idx][col_idx];
-                                    row.col(|ui| match dtype {
+                                    let match_idx = self
+                                        .search_matches
+                                        .iter()
+                                        .position(|&(r, c)| r == row_idx && c == col_idx);
+                                    let mut show_cell = |ui: &mut egui::Ui| match dtype {
                                         DataType::Boolean => {
                                             let mut checked = matches!(cell.as_str(), "true" | "1");
                                             if ui.checkbox(&mut checked, "").changed() {
@@ -680,6 +735,7 @@ impl eframe::App for ParquetApp {
                                                 {
                                                     self.status = format!("Edit failed: {e}");
                                                 }
+                                                self.update_search_matches();
                                             }
                                         }
                                         _ => {
@@ -690,9 +746,22 @@ impl eframe::App for ParquetApp {
                                                 {
                                                     self.status = format!("Edit failed: {e}");
                                                 }
+                                                self.update_search_matches();
                                             }
                                         }
-                                    });
+                                    };
+                                    if let Some(idx) = match_idx {
+                                        let color = if idx == self.search_index {
+                                            egui::Color32::from_rgb(255, 200, 200)
+                                        } else {
+                                            egui::Color32::from_rgb(255, 255, 0)
+                                        };
+                                        egui::Frame::none().fill(color).show(ui, |ui| {
+                                            show_cell(ui);
+                                        });
+                                    } else {
+                                        show_cell(ui);
+                                    }
                                 }
                             });
                         }
