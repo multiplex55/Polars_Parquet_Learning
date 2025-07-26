@@ -316,9 +316,12 @@ pub fn create_dataframe(
 /// are provided nested folders are created so each combination ends up at
 /// `dir/<col1>/<col2>.parquet` and so on.
 pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<()> {
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
 
     std::fs::create_dir_all(dir)?;
+    let mut written: HashSet<PathBuf> = HashSet::new();
+
     for part in df.partition_by(columns.iter().copied(), true)? {
         let mut path: PathBuf = Path::new(dir).to_path_buf();
         for &col in columns {
@@ -332,12 +335,28 @@ pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<
             path.push(value);
         }
         path.set_extension("parquet");
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+
+        // Ensure we don't overwrite files when sanitised names collide
+        let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut unique_path = path.clone();
+        let mut idx = 1;
+        while written.contains(&unique_path) {
+            unique_path = parent.join(format!("{}_{idx}", stem));
+            unique_path.set_extension("parquet");
+            idx += 1;
         }
-        let file = path.to_string_lossy().to_string();
+
+        if let Some(p) = unique_path.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        let file = unique_path.to_string_lossy().to_string();
         let mut part = part;
         write_dataframe_to_parquet(&mut part, &file)?;
+        written.insert(unique_path);
     }
     Ok(())
 }
@@ -590,6 +609,7 @@ mod tests {
             vec![AnyValue::Int64(3), AnyValue::String("e?f".into())],
             vec![AnyValue::Int64(4), AnyValue::String("<g>".into())],
             vec![AnyValue::Int64(5), AnyValue::String("h|i".into())],
+            vec![AnyValue::Int64(6), AnyValue::String("a/b".into())],
         ];
 
         let df = create_dataframe(&schema, &rows)?;
@@ -605,6 +625,7 @@ mod tests {
             vec![
                 "_g_.parquet",
                 "a_b.parquet",
+                "a_b_1.parquet",
                 "c_d.parquet",
                 "e_f.parquet",
                 "h_i.parquet",
