@@ -15,7 +15,7 @@ use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
 use rfd::FileDialog;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -117,6 +117,12 @@ struct ParquetApp {
     page_size: usize,
     /// Total rows in the source file
     total_rows: usize,
+    /// Cached pages of data
+    page_cache: std::collections::HashMap<usize, DataFrame>,
+    /// Least recently used order for cached pages
+    cache_order: std::collections::VecDeque<usize>,
+    /// Start index of a page currently being prefetched
+    prefetch_start: Option<usize>,
     #[cfg(feature = "plotting")]
     /// Selected column to plot
     plot_column: Option<String>,
@@ -170,6 +176,9 @@ impl Default for ParquetApp {
             page_start: 0,
             page_size: 100,
             total_rows: 0,
+            page_cache: std::collections::HashMap::new(),
+            cache_order: std::collections::VecDeque::new(),
+            prefetch_start: None,
             #[cfg(feature = "plotting")]
             plot_column: None,
             #[cfg(feature = "plotting")]
@@ -399,6 +408,9 @@ impl ParquetApp {
         let path = self.file_path.clone();
         let use_dir = self.use_directory;
         self.page_start = 0;
+        self.page_cache.clear();
+        self.cache_order.clear();
+        self.prefetch_start = None;
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
@@ -431,6 +443,18 @@ impl ParquetApp {
 
     /// Load the current page from the Parquet file.
     fn load_page(&mut self) {
+        if let Some(cached) = self.page_cache.get(&self.page_start) {
+            self.edit_df = Some(cached.clone());
+            self.refresh_dataframe_state(cached);
+            let end = (self.page_start + cached.height()).min(self.total_rows);
+            self.status = format!("Rows {}-{} of {}", self.page_start + 1, end, self.total_rows);
+            if let Some(pos) = self.cache_order.iter().position(|&p| p == self.page_start) {
+                self.cache_order.remove(pos);
+            }
+            self.cache_order.push_back(self.page_start);
+            return;
+        }
+
         let path = self.file_path.clone();
         let start = self.page_start as i64;
         let len = self.page_size;
@@ -452,6 +476,7 @@ impl ParquetApp {
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
+        self.prefetch_start = None;
         self.progress = Some(0.0);
         self.status = "Reading...".into();
         self.runtime.spawn(async move {
@@ -468,6 +493,9 @@ impl ParquetApp {
         let path = self.file_path.clone();
         let len = self.page_size;
         let start = self.page_start as i64;
+        self.page_cache.clear();
+        self.cache_order.clear();
+        self.prefetch_start = None;
         let exprs: Vec<String> = self
             .column_filters
             .iter()
@@ -952,51 +980,102 @@ impl eframe::App for ParquetApp {
                             self.progress = Some(p);
                         }
                         Ok(JobUpdate::Done(JobResult::DataFrame(df))) => {
-                            self.busy = false;
-                            self.result_rx = None;
-                            self.progress = None;
-                            if self.status.starts_with("Filtering") {
-                                let end = (self.page_start + df.height()).min(self.total_rows);
-                                self.status = format!(
-                                    "Rows {}-{} of {}",
-                                    self.page_start + 1,
-                                    end,
-                                    self.total_rows
-                                );
-                            } else if self.use_directory {
-                                    self.total_rows = df.height();
-                                    self.status = format!("Combined {} rows", df.height());
-                                } else {
-                                    let ext = Path::new(&self.file_path)
-                                        .extension()
-                                        .and_then(|e| e.to_str())
-                                        .unwrap_or("")
-                                        .to_ascii_lowercase();
-                                    match ext.as_str() {
-                                        "csv" => {
-                                            self.total_rows = df.height();
-                                            self.status =
-                                                format!("Loaded {} rows from CSV", df.height());
-                                        }
-                                        "json" => {
-                                            self.total_rows = df.height();
-                                            self.status =
-                                                format!("Loaded {} rows from JSON", df.height());
-                                        }
-                                        _ => {
-                                            let end = (self.page_start + df.height())
-                                                .min(self.total_rows);
-                                            self.status = format!(
-                                                "Rows {}-{} of {}",
-                                                self.page_start + 1,
-                                                end,
-                                                self.total_rows
-                                            );
+                            let prefetch = !self.busy;
+                            let start_idx = if prefetch {
+                                self.prefetch_start.take().unwrap_or(self.page_start)
+                            } else {
+                                self.page_start
+                            };
+                            if !prefetch {
+                                self.busy = false;
+                                self.result_rx = None;
+                                self.progress = None;
+                                if self.status.starts_with("Filtering") {
+                                    let end = (self.page_start + df.height()).min(self.total_rows);
+                                    self.status = format!(
+                                        "Rows {}-{} of {}",
+                                        self.page_start + 1,
+                                        end,
+                                        self.total_rows
+                                    );
+                                } else if self.use_directory {
+                                        self.total_rows = df.height();
+                                        self.status = format!("Combined {} rows", df.height());
+                                    } else {
+                                        let ext = Path::new(&self.file_path)
+                                            .extension()
+                                            .and_then(|e| e.to_str())
+                                            .unwrap_or("")
+                                            .to_ascii_lowercase();
+                                        match ext.as_str() {
+                                            "csv" => {
+                                                self.total_rows = df.height();
+                                                self.status =
+                                                    format!("Loaded {} rows from CSV", df.height());
+                                            }
+                                            "json" => {
+                                                self.total_rows = df.height();
+                                                self.status =
+                                                    format!("Loaded {} rows from JSON", df.height());
+                                            }
+                                            _ => {
+                                                let end = (self.page_start + df.height())
+                                                    .min(self.total_rows);
+                                                self.status = format!(
+                                                    "Rows {}-{} of {}",
+                                                    self.page_start + 1,
+                                                    end,
+                                                    self.total_rows
+                                                );
+                                            }
                                         }
                                     }
+                                    self.refresh_dataframe_state(&df);
+                                    self.edit_df = Some(df.clone());
+                            }
+
+                            self.page_cache.insert(start_idx, df.clone());
+                            if let Some(pos) = self.cache_order.iter().position(|&p| p == start_idx) {
+                                self.cache_order.remove(pos);
+                            }
+                            self.cache_order.push_back(start_idx);
+                            while self.cache_order.len() > 3 {
+                                if let Some(old) = self.cache_order.pop_front() {
+                                    self.page_cache.remove(&old);
                                 }
-                                self.refresh_dataframe_state(&df);
-                                self.edit_df = Some(df);
+                            }
+
+                            if !prefetch {
+                                let next_start = self.page_start + self.page_size;
+                                if next_start < self.total_rows && !self.page_cache.contains_key(&next_start) {
+                                    let path = self.file_path.clone();
+                                    let len = self.page_size;
+                                    let exprs: Vec<String> = self
+                                        .column_filters
+                                        .iter()
+                                        .filter_map(|(name, f)| {
+                                            if f.value.trim().is_empty() {
+                                                None
+                                            } else {
+                                                let op = match f.op {
+                                                    FilterOp::Equals => "==",
+                                                    FilterOp::Contains => "contains",
+                                                };
+                                                Some(format!("{} {} \"{}\"", name, op, f.value))
+                                            }
+                                        })
+                                        .collect();
+                                    let (tx, rx) = mpsc::channel();
+                                    self.result_rx = Some(rx);
+                                    self.prefetch_start = Some(next_start);
+                                    self.runtime.spawn(async move {
+                                        if exprs.is_empty() {
+                                            background::read_dataframe_slice(path, next_start as i64, len, tx).await;
+                                        } else {
+                                            background::read_filter_slice(path, exprs, next_start as i64, len, tx).await;
+                                        }
+                                    });
+                                }
                             }
                         }
                         Ok(JobUpdate::Done(JobResult::Unit)) => {
