@@ -45,6 +45,14 @@ pub async fn read_json(path: String) -> Result<JobResult> {
     Ok(JobResult::DataFrame(df))
 }
 
+/// Asynchronously read a slice of rows from a Parquet file.
+pub async fn read_dataframe_slice(path: String, start: i64, len: usize) -> Result<JobResult> {
+    let df =
+        task::spawn_blocking(move || parquet_examples::read_parquet_slice(&path, start, len))
+            .await??;
+    Ok(JobResult::DataFrame(df))
+}
+
 /// Asynchronously write a [`DataFrame`] to Parquet.
 pub async fn write_dataframe(mut df: DataFrame, path: String) -> Result<JobResult> {
     task::spawn_blocking(move || parquet_examples::write_dataframe_to_parquet(&mut df, &path))
