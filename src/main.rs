@@ -89,6 +89,12 @@ struct ParquetApp {
     status: String,
     /// Number of rows to display from the current DataFrame
     display_rows: usize,
+    /// Start index of the current page
+    page_start: usize,
+    /// Number of rows per page
+    page_size: usize,
+    /// Total rows in the source file
+    total_rows: usize,
     #[cfg(feature = "plotting")]
     /// Selected column to plot
     plot_column: Option<String>,
@@ -133,6 +139,9 @@ impl Default for ParquetApp {
             query_expr: String::new(),
             status: String::new(),
             display_rows: 5,
+            page_start: 0,
+            page_size: 100,
+            total_rows: 0,
             #[cfg(feature = "plotting")]
             plot_column: None,
             #[cfg(feature = "plotting")]
@@ -311,10 +320,18 @@ impl ParquetApp {
     fn start_read(&mut self) {
         let path = self.file_path.clone();
         let use_dir = self.use_directory;
+        self.page_start = 0;
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
         self.status = "Reading...".into();
+        let page_size = self.page_size;
+        if !use_dir {
+            if let Ok(meta) = parquet_examples::read_parquet_metadata(&path) {
+                self.total_rows = meta.file_metadata().num_rows() as usize;
+                self.metadata = Some(meta);
+            }
+        }
         self.runtime.spawn(async move {
             let res = if use_dir {
                 background::read_directory(path).await
@@ -327,9 +344,24 @@ impl ParquetApp {
                 match ext.as_str() {
                     "csv" => background::read_csv(path).await,
                     "json" => background::read_json(path).await,
-                    _ => background::read_dataframe(path).await,
+                    _ => background::read_dataframe_slice(path, 0, page_size).await,
                 }
             };
+            let _ = tx.send(res);
+        });
+    }
+
+    /// Load the current page from the Parquet file.
+    fn load_page(&mut self) {
+        let path = self.file_path.clone();
+        let start = self.page_start as i64;
+        let len = self.page_size;
+        let (tx, rx) = mpsc::channel();
+        self.result_rx = Some(rx);
+        self.busy = true;
+        self.status = "Reading...".into();
+        self.runtime.spawn(async move {
+            let res = background::read_dataframe_slice(path, start, len).await;
             let _ = tx.send(res);
         });
     }
@@ -353,7 +385,20 @@ impl eframe::App for ParquetApp {
             let mut sort_after: Option<String> = None;
             egui::SidePanel::right("preview_panel").show(ctx, |ui| {
                 ui.heading("Preview");
-                ui.label(format!("Rows: {}", df.height()));
+                let end = (self.page_start + df.height()).min(self.total_rows);
+                ui.label(format!("Rows {}-{} of {}", self.page_start + 1, end, self.total_rows));
+                if self.total_rows > self.page_size {
+                    ui.horizontal(|ui| {
+                        if ui.button("Previous").clicked() && self.page_start >= self.page_size {
+                            self.page_start -= self.page_size;
+                            self.load_page();
+                        }
+                        if ui.button("Next").clicked() && self.page_start + self.page_size < self.total_rows {
+                            self.page_start += self.page_size;
+                            self.load_page();
+                        }
+                    });
+                }
                 ui.horizontal(|ui| {
                     ui.label("Rows to display:");
                     ui.add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000));
@@ -628,6 +673,7 @@ impl eframe::App for ParquetApp {
                     match res {
                         Ok(JobResult::DataFrame(df)) => {
                             if self.use_directory {
+                                self.total_rows = df.height();
                                 self.status = format!("Combined {} rows", df.height());
                             } else {
                                 let ext = Path::new(&self.file_path)
@@ -637,20 +683,19 @@ impl eframe::App for ParquetApp {
                                     .to_ascii_lowercase();
                                 match ext.as_str() {
                                     "csv" => {
+                                        self.total_rows = df.height();
                                         self.status =
                                             format!("Loaded {} rows from CSV", df.height());
                                     }
                                     "json" => {
+                                        self.total_rows = df.height();
                                         self.status =
                                             format!("Loaded {} rows from JSON", df.height());
                                     }
                                     _ => {
-                                        self.status = format!("Loaded {} rows", df.height());
-                                        if let Ok(meta) =
-                                            parquet_examples::read_parquet_metadata(&self.file_path)
-                                        {
-                                            self.metadata = Some(meta);
-                                        }
+                                        let end = (self.page_start + df.height()).min(self.total_rows);
+                                        self.status =
+                                            format!("Rows {}-{} of {}", self.page_start + 1, end, self.total_rows);
                                     }
                                 }
                             }

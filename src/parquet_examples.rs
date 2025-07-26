@@ -369,6 +369,17 @@ pub fn read_selected_columns(path: &str, columns: &[&str]) -> Result<DataFrame> 
     Ok(lf.collect()?)
 }
 
+/// Read a slice of rows from a Parquet file.
+///
+/// This performs a lazy scan and applies [`slice`] before collecting
+/// the result.  `start` is the zero-based offset of the first row and
+/// `len` is the number of rows to return.
+pub fn read_parquet_slice(path: &str, start: i64, len: usize) -> Result<DataFrame> {
+    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?
+        .slice(start, len as u32);
+    Ok(lf.collect()?)
+}
+
 /// Filter rows in a Parquet file by a prefix on the `name` column.
 ///
 /// This demonstrates constructing an expression on a `LazyFrame` before
@@ -793,6 +804,21 @@ mod tests {
 
         let read = read_dremel_parquet(path.to_str().unwrap())?;
         assert_eq!(rows, read);
+        Ok(())
+    }
+
+    #[test]
+    fn slice_reads_correct_rows() -> Result<()> {
+        let dir = tempdir()?;
+        let file = dir.path().join("data.parquet");
+
+        let mut df = df!("id" => &[1i64, 2, 3, 4], "name" => &["a", "b", "c", "d"])?;
+        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+
+        let slice = read_parquet_slice(file.to_str().unwrap(), 1, 2)?;
+        assert_eq!(slice.height(), 2);
+        let ids: Vec<i64> = slice.column("id")?.i64()?.into_no_null_iter().collect();
+        assert_eq!(ids, vec![2, 3]);
         Ok(())
     }
 }
