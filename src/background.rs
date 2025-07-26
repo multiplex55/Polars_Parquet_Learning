@@ -97,6 +97,22 @@ pub async fn read_dataframe_slice(
     run_with_progress(tx, move || parquet_examples::read_parquet_slice(&path, start, len), JobResult::DataFrame).await;
 }
 
+/// Asynchronously filter a Parquet file and return a slice of rows.
+pub async fn read_filter_slice(
+    path: String,
+    exprs: Vec<String>,
+    start: i64,
+    len: usize,
+    tx: Sender<anyhow::Result<JobUpdate>>,
+) {
+    run_with_progress(
+        tx,
+        move || parquet_examples::filter_slice(&path, &exprs, start, len),
+        JobResult::DataFrame,
+    )
+    .await;
+}
+
 /// Asynchronously write a [`DataFrame`] to Parquet.
 pub async fn write_dataframe(mut df: DataFrame, path: String, tx: Sender<anyhow::Result<JobUpdate>>) {
     run_with_progress(

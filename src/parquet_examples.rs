@@ -505,6 +505,31 @@ pub fn filter_with_exprs(path: &str, exprs: &[String]) -> Result<DataFrame> {
     Ok(df)
 }
 
+/// Apply multiple expressions as filters and return a slice of rows.
+pub fn filter_slice(path: &str, exprs: &[String], start: i64, len: usize) -> Result<DataFrame> {
+    let mut lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+    let mut contains: Vec<(String, String)> = Vec::new();
+    for ex in exprs {
+        let parts: Vec<String> = shlex::Shlex::new(ex).collect();
+        if parts.len() == 3 && parts[1].eq_ignore_ascii_case("contains") {
+            let val = parts[2].trim_matches(&['"', '\''][..]).to_string();
+            contains.push((parts[0].clone(), val));
+        } else {
+            lf = lf.filter(parse_simple_expr(ex)?);
+        }
+    }
+    let mut df = lf.slice(start, len as u32).collect()?;
+    for (col, val) in contains {
+        let series = df
+            .column(&col)?
+            .as_series()
+            .ok_or_else(|| anyhow::anyhow!("missing series"))?;
+        let mask = series.str()?.contains_literal(&val)?;
+        df = df.filter(&mask)?;
+    }
+    Ok(df)
+}
+
 /// Retrieve low level metadata from a Parquet file using the `parquet` crate.
 ///
 /// Accessing the metadata can be useful for quickly inspecting files without
