@@ -386,14 +386,21 @@ impl eframe::App for ParquetApp {
             egui::SidePanel::right("preview_panel").show(ctx, |ui| {
                 ui.heading("Preview");
                 let end = (self.page_start + df.height()).min(self.total_rows);
-                ui.label(format!("Rows {}-{} of {}", self.page_start + 1, end, self.total_rows));
+                ui.label(format!(
+                    "Rows {}-{} of {}",
+                    self.page_start + 1,
+                    end,
+                    self.total_rows
+                ));
                 if self.total_rows > self.page_size {
                     ui.horizontal(|ui| {
                         if ui.button("Previous").clicked() && self.page_start >= self.page_size {
                             self.page_start -= self.page_size;
                             self.load_page();
                         }
-                        if ui.button("Next").clicked() && self.page_start + self.page_size < self.total_rows {
+                        if ui.button("Next").clicked()
+                            && self.page_start + self.page_size < self.total_rows
+                        {
                             self.page_start += self.page_size;
                             self.load_page();
                         }
@@ -626,7 +633,8 @@ impl eframe::App for ParquetApp {
                                                     .map(|(x, y)| [x, y])
                                                     .collect();
                                                 Plot::new("scatter").show(ui, |plot_ui| {
-                                                    plot_ui.points(egui_plot::Points::new("", points));
+                                                    plot_ui
+                                                        .points(egui_plot::Points::new("", points));
                                                 });
                                             }
                                         }
@@ -641,7 +649,8 @@ impl eframe::App for ParquetApp {
                                             let q3 = sorted[(sorted.len() as f64 * 0.75) as usize];
                                             let min = *sorted.first().unwrap();
                                             let max = *sorted.last().unwrap();
-                                            let spread = egui_plot::BoxSpread::new(min, q1, q2, q3, max);
+                                            let spread =
+                                                egui_plot::BoxSpread::new(min, q1, q2, q3, max);
                                             let elem = BoxElem::new(0.0, spread);
                                             Plot::new("boxplot").show(ui, |plot_ui| {
                                                 plot_ui.box_plot(BoxPlot::new("", vec![elem]));
@@ -667,50 +676,63 @@ impl eframe::App for ParquetApp {
             ui.label("Drag and drop a Parquet file to load it automatically.");
 
             if let Some(rx) = &self.result_rx {
-                if let Ok(res) = rx.try_recv() {
-                    self.busy = false;
-                    self.result_rx = None;
-                    match res {
-                        Ok(JobResult::DataFrame(df)) => {
-                            if self.use_directory {
-                                self.total_rows = df.height();
-                                self.status = format!("Combined {} rows", df.height());
-                            } else {
-                                let ext = Path::new(&self.file_path)
-                                    .extension()
-                                    .and_then(|e| e.to_str())
-                                    .unwrap_or("")
-                                    .to_ascii_lowercase();
-                                match ext.as_str() {
-                                    "csv" => {
-                                        self.total_rows = df.height();
-                                        self.status =
-                                            format!("Loaded {} rows from CSV", df.height());
-                                    }
-                                    "json" => {
-                                        self.total_rows = df.height();
-                                        self.status =
-                                            format!("Loaded {} rows from JSON", df.height());
-                                    }
-                                    _ => {
-                                        let end = (self.page_start + df.height()).min(self.total_rows);
-                                        self.status =
-                                            format!("Rows {}-{} of {}", self.page_start + 1, end, self.total_rows);
+                match rx.try_recv() {
+                    Ok(res) => {
+                        self.busy = false;
+                        self.result_rx = None;
+                        match res {
+                            Ok(JobResult::DataFrame(df)) => {
+                                if self.use_directory {
+                                    self.total_rows = df.height();
+                                    self.status = format!("Combined {} rows", df.height());
+                                } else {
+                                    let ext = Path::new(&self.file_path)
+                                        .extension()
+                                        .and_then(|e| e.to_str())
+                                        .unwrap_or("")
+                                        .to_ascii_lowercase();
+                                    match ext.as_str() {
+                                        "csv" => {
+                                            self.total_rows = df.height();
+                                            self.status =
+                                                format!("Loaded {} rows from CSV", df.height());
+                                        }
+                                        "json" => {
+                                            self.total_rows = df.height();
+                                            self.status =
+                                                format!("Loaded {} rows from JSON", df.height());
+                                        }
+                                        _ => {
+                                            let end = (self.page_start + df.height())
+                                                .min(self.total_rows);
+                                            self.status = format!(
+                                                "Rows {}-{} of {}",
+                                                self.page_start + 1,
+                                                end,
+                                                self.total_rows
+                                            );
+                                        }
                                     }
                                 }
+                                self.loaded_schema = df
+                                    .get_column_names()
+                                    .into_iter()
+                                    .zip(df.dtypes())
+                                    .map(|(n, t)| (n.to_string(), t))
+                                    .collect();
+                                self.edit_df = Some(df);
                             }
-                            self.loaded_schema = df
-                                .get_column_names()
-                                .into_iter()
-                                .zip(df.dtypes())
-                                .map(|(n, t)| (n.to_string(), t))
-                                .collect();
-                            self.edit_df = Some(df);
+                            Ok(JobResult::Unit) => {
+                                self.status = "Done".into();
+                            }
+                            Err(e) => self.status = format!("Failed: {e}"),
                         }
-                        Ok(JobResult::Unit) => {
-                            self.status = "Done".into();
-                        }
-                        Err(e) => self.status = format!("Failed: {e}"),
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.busy = false;
+                        self.result_rx = None;
+                        self.status = "Background task disconnected".into();
                     }
                 }
             }
@@ -1092,8 +1114,7 @@ impl eframe::App for ParquetApp {
                             self.xml_schema,
                         ) {
                             Ok(_) => {
-                                self.status =
-                                    format!("Wrote Parquet tables to {}", self.save_path);
+                                self.status = format!("Wrote Parquet tables to {}", self.save_path);
                             }
                             Err(e) => self.status = format!("XML conversion failed: {e}"),
                         }
@@ -1156,5 +1177,37 @@ mod tests {
         let rows = vec![vec!["1".to_string(), "2".to_string()]];
         let err = build_dataframe(&schema, &rows).unwrap_err();
         assert!(err.to_string().contains("duplicate column name"));
+    }
+
+    #[test]
+    fn dropped_sender_clears_busy() {
+        let mut app = ParquetApp::default();
+        let (_tx, rx) = mpsc::channel::<anyhow::Result<JobResult>>();
+        app.result_rx = Some(rx);
+        app.busy = true;
+
+        if let Some(rx) = &app.result_rx {
+            match rx.try_recv() {
+                Ok(res) => {
+                    app.busy = false;
+                    app.result_rx = None;
+                    match res {
+                        Ok(JobResult::DataFrame(df)) => app.edit_df = Some(df),
+                        Ok(JobResult::Unit) => app.status = "Done".into(),
+                        Err(e) => app.status = format!("Failed: {e}"),
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    app.busy = false;
+                    app.result_rx = None;
+                    app.status = "Background task disconnected".into();
+                }
+            }
+        }
+
+        assert!(!app.busy);
+        assert!(app.result_rx.is_none());
+        assert_eq!(app.status, "Background task disconnected");
     }
 }
