@@ -427,7 +427,11 @@ pub fn read_parquet_slice(path: &str, start: i64, len: usize) -> Result<DataFram
 /// Compute histogram counts for a slice of values.
 ///
 /// Returns the bin counts along with the minimum value and bin step.
-pub fn compute_histogram(values: &[f64], bins: usize, range: Option<(f64, f64)>) -> (Vec<f64>, f64, f64) {
+pub fn compute_histogram(
+    values: &[f64],
+    bins: usize,
+    range: Option<(f64, f64)>,
+) -> (Vec<f64>, f64, f64) {
     if bins == 0 {
         return (Vec::new(), 0.0, 0.0);
     }
@@ -445,7 +449,9 @@ pub fn compute_histogram(values: &[f64], bins: usize, range: Option<(f64, f64)>)
     };
     let step = (max - min) / bins as f64;
     let mut counts = vec![0f64; bins];
-    if step != 0.0 {
+    if step == 0.0 {
+        counts[0] = values.len() as f64;
+    } else {
         for &v in values {
             let mut idx = ((v - min) / step).floor() as isize;
             if idx < 0 {
