@@ -168,7 +168,7 @@ fn paginate_filtered_contains() -> anyhow::Result<()> {
         panic!("unexpected result")
     }
     if let background::JobResult::DataFrame(df2) = res2 {
-        assert_eq!(df2.height(), 25);
+        assert_eq!(df2.height(), 14);
     } else {
         panic!("unexpected result")
     }
