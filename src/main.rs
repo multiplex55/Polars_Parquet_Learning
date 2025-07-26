@@ -6,7 +6,7 @@ pub mod cli;
 pub mod parquet_examples;
 
 use anyhow::Result;
-use background::JobResult;
+use background::{JobResult, JobUpdate};
 use clap::Parser;
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
@@ -122,8 +122,8 @@ struct ParquetApp {
     plot_type: PlotType,
     /// Tokio runtime for background tasks
     runtime: tokio::runtime::Runtime,
-    /// Receives results from background jobs
-    result_rx: Option<std::sync::mpsc::Receiver<anyhow::Result<background::JobResult>>>,
+    /// Receives updates from background jobs
+    result_rx: Option<std::sync::mpsc::Receiver<anyhow::Result<background::JobUpdate>>>,
     /// Metadata for the loaded Parquet file
     metadata: Option<parquet::file::metadata::ParquetMetaData>,
     /// Schema of the loaded DataFrame
@@ -132,6 +132,8 @@ struct ParquetApp {
     show_schema: bool,
     /// Indicates an operation is running
     busy: bool,
+    /// Current progress value if known
+    progress: Option<f32>,
     /// Treat the selected path as a directory when reading
     use_directory: bool,
     /// Write an additional _schema.json when converting XML
@@ -171,6 +173,7 @@ impl Default for ParquetApp {
             loaded_schema: Vec::new(),
             show_schema: false,
             busy: false,
+            progress: None,
             use_directory: false,
             xml_schema: false,
         }
@@ -390,6 +393,7 @@ impl ParquetApp {
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
+        self.progress = Some(0.0);
         self.status = "Reading...".into();
         let page_size = self.page_size;
         if !use_dir {
@@ -399,8 +403,8 @@ impl ParquetApp {
             }
         }
         self.runtime.spawn(async move {
-            let res = if use_dir {
-                background::read_directory(path).await
+            if use_dir {
+                background::read_directory(path, tx).await;
             } else {
                 let ext = std::path::Path::new(&path)
                     .extension()
@@ -408,12 +412,11 @@ impl ParquetApp {
                     .unwrap_or("")
                     .to_ascii_lowercase();
                 match ext.as_str() {
-                    "csv" => background::read_csv(path).await,
-                    "json" => background::read_json(path).await,
-                    _ => background::read_dataframe_slice(path, 0, page_size).await,
+                    "csv" => background::read_csv(path, tx).await,
+                    "json" => background::read_json(path, tx).await,
+                    _ => background::read_dataframe_slice(path, 0, page_size, tx).await,
                 }
-            };
-            let _ = tx.send(res);
+            }
         });
     }
 
@@ -425,10 +428,10 @@ impl ParquetApp {
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
+        self.progress = Some(0.0);
         self.status = "Reading...".into();
         self.runtime.spawn(async move {
-            let res = background::read_dataframe_slice(path, start, len).await;
-            let _ = tx.send(res);
+            background::read_dataframe_slice(path, start, len, tx).await;
         });
     }
 
@@ -454,15 +457,15 @@ impl ParquetApp {
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
+        self.progress = Some(0.0);
         self.page_start = 0;
         self.status = "Filtering...".into();
         self.runtime.spawn(async move {
-            let res = if exprs.is_empty() {
-                background::read_dataframe_slice(path, 0, len).await
+            if exprs.is_empty() {
+                background::read_dataframe_slice(path, 0, len, tx).await;
             } else {
-                background::filter_with_exprs(path, exprs).await
-            };
-            let _ = tx.send(res);
+                background::filter_with_exprs(path, exprs, tx).await;
+            }
         });
     }
 }
@@ -588,10 +591,10 @@ impl eframe::App for ParquetApp {
                     let (tx, rx) = mpsc::channel();
                     self.result_rx = Some(rx);
                     self.busy = true;
+                    self.progress = Some(0.0);
                     self.status = "Saving...".into();
                     self.runtime.spawn(async move {
-                        let res = background::write_dataframe(df, file).await;
-                        let _ = tx.send(res);
+                        background::write_dataframe(df, file, tx).await;
                     });
                 }
 
@@ -809,14 +812,17 @@ impl eframe::App for ParquetApp {
 
             if let Some(rx) = &self.result_rx {
                 match rx.try_recv() {
-                    Ok(res) => {
-                        self.busy = false;
-                        self.result_rx = None;
-                        match res {
-                            Ok(JobResult::DataFrame(df)) => {
-                                if self.status.starts_with("Filtering") {
-                                    self.total_rows = df.height();
-                                    self.status = format!("Filtered to {} rows", df.height());
+                    Ok(res) => match res {
+                        Ok(JobUpdate::Progress(p)) => {
+                            self.progress = Some(p);
+                        }
+                        Ok(JobUpdate::Done(JobResult::DataFrame(df))) => {
+                            self.busy = false;
+                            self.result_rx = None;
+                            self.progress = None;
+                            if self.status.starts_with("Filtering") {
+                                self.total_rows = df.height();
+                                self.status = format!("Filtered to {} rows", df.height());
                                 } else if self.use_directory {
                                     self.total_rows = df.height();
                                     self.status = format!("Combined {} rows", df.height());
@@ -863,16 +869,25 @@ impl eframe::App for ParquetApp {
                                 self.rows = dataframe_to_rows(&df);
                                 self.edit_df = Some(df);
                             }
-                            Ok(JobResult::Unit) => {
-                                self.status = "Done".into();
-                            }
-                            Err(e) => self.status = format!("Failed: {e}"),
                         }
-                    }
+                        Ok(JobUpdate::Done(JobResult::Unit)) => {
+                            self.busy = false;
+                            self.result_rx = None;
+                            self.progress = None;
+                            self.status = "Done".into();
+                        }
+                        Err(e) => {
+                            self.busy = false;
+                            self.result_rx = None;
+                            self.progress = None;
+                            self.status = format!("Failed: {e}");
+                        }
+                    },
                     Err(mpsc::TryRecvError::Empty) => {}
                     Err(mpsc::TryRecvError::Disconnected) => {
                         self.busy = false;
                         self.result_rx = None;
+                        self.progress = None;
                         self.status = "Background task disconnected".into();
                     }
                 }
@@ -1108,7 +1123,11 @@ impl eframe::App for ParquetApp {
             ui.separator();
             ui.label(&self.status);
             if self.busy {
-                ui.add(egui::Spinner::new());
+                if let Some(p) = self.progress {
+                    ui.add(egui::ProgressBar::new(p).show_percentage());
+                } else {
+                    ui.add(egui::Spinner::new());
+                }
             }
 
             // Run the selected action
@@ -1178,10 +1197,10 @@ impl eframe::App for ParquetApp {
                                 let (tx, rx) = mpsc::channel();
                                 self.result_rx = Some(rx);
                                 self.busy = true;
+                                self.progress = Some(0.0);
                                 self.status = "Writing...".into();
                                 self.runtime.spawn(async move {
-                                    let res = background::write_dataframe(df, file).await;
-                                    let _ = tx.send(res);
+                                    background::write_dataframe(df, file, tx).await;
                                 });
                             }
                         } else {
@@ -1371,7 +1390,7 @@ mod tests {
     #[test]
     fn dropped_sender_clears_busy() {
         let mut app = ParquetApp::default();
-        let (_tx, rx) = mpsc::channel::<anyhow::Result<JobResult>>();
+        let (_tx, rx) = mpsc::channel::<anyhow::Result<JobUpdate>>();
         app.result_rx = Some(rx);
         app.busy = true;
 
@@ -1381,8 +1400,9 @@ mod tests {
                     app.busy = false;
                     app.result_rx = None;
                     match res {
-                        Ok(JobResult::DataFrame(df)) => app.edit_df = Some(df),
-                        Ok(JobResult::Unit) => app.status = "Done".into(),
+                        Ok(JobUpdate::Progress(p)) => app.progress = Some(p),
+                        Ok(JobUpdate::Done(JobResult::DataFrame(df))) => app.edit_df = Some(df),
+                        Ok(JobUpdate::Done(JobResult::Unit)) => app.status = "Done".into(),
                         Err(e) => app.status = format!("Failed: {e}"),
                     }
                 }
