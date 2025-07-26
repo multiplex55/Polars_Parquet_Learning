@@ -530,6 +530,23 @@ pub fn filter_slice(path: &str, exprs: &[String], start: i64, len: usize) -> Res
     Ok(df)
 }
 
+/// Return the number of rows matching multiple expressions without collecting them all.
+pub fn filter_count(path: &str, exprs: &[String]) -> Result<usize> {
+    let mut lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+    for ex in exprs {
+        let parts: Vec<String> = shlex::Shlex::new(ex).collect();
+        if parts.len() == 3 && parts[1].eq_ignore_ascii_case("contains") {
+            let val = parts[2].trim_matches(&['"', '\''][..]).to_string();
+            lf = lf.filter(col(&parts[0]).str().contains_literal(lit(val)));
+        } else {
+            lf = lf.filter(parse_simple_expr(ex)?);
+        }
+    }
+    let df = lf.select([len()]).collect()?;
+    let n = df.column("len")?.u32()?.get(0).unwrap_or(0);
+    Ok(n as usize)
+}
+
 /// Retrieve low level metadata from a Parquet file using the `parquet` crate.
 ///
 /// Accessing the metadata can be useful for quickly inspecting files without

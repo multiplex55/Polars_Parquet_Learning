@@ -447,7 +447,12 @@ impl ParquetApp {
             self.edit_df = Some(cached.clone());
             self.refresh_dataframe_state(cached);
             let end = (self.page_start + cached.height()).min(self.total_rows);
-            self.status = format!("Rows {}-{} of {}", self.page_start + 1, end, self.total_rows);
+            self.status = format!(
+                "Rows {}-{} of {}",
+                self.page_start + 1,
+                end,
+                self.total_rows
+            );
             if let Some(pos) = self.cache_order.iter().position(|&p| p == self.page_start) {
                 self.cache_order.remove(pos);
             }
@@ -517,18 +522,15 @@ impl ParquetApp {
         self.progress = Some(0.0);
         self.page_start = 0;
         self.status = "Filtering...".into();
-        let count = if exprs.is_empty() {
-            self.total_rows
-        } else {
-            parquet_examples::filter_with_exprs(&path, &exprs)
-                .map(|df| df.height())
-                .unwrap_or(0)
-        };
-        self.total_rows = count;
+        self.total_rows = 0;
         self.runtime.spawn(async move {
             if exprs.is_empty() {
                 background::read_dataframe_slice(path, start, len, tx).await;
             } else {
+                let tx_clone = tx.clone();
+                let path_clone = path.clone();
+                let exprs_clone = exprs.clone();
+                background::filter_count(path_clone, exprs_clone, tx_clone).await;
                 background::read_filter_slice(path, exprs, start, len, tx).await;
             }
         });
@@ -735,17 +737,14 @@ impl eframe::App for ParquetApp {
                         });
                 }
 
-
                 ui.separator();
                 ui.label("Column operations");
                 egui::ComboBox::from_label("Column")
-                    .selected_text(
-                        if self.rename_column.is_empty() {
-                            "Select".to_string()
-                        } else {
-                            self.rename_column.clone()
-                        },
-                    )
+                    .selected_text(if self.rename_column.is_empty() {
+                        "Select".to_string()
+                    } else {
+                        self.rename_column.clone()
+                    })
                     .show_ui(ui, |ui| {
                         for name in df.get_column_names_str() {
                             ui.selectable_value(&mut self.rename_column, name.to_string(), name);
@@ -755,7 +754,9 @@ impl eframe::App for ParquetApp {
                     ui.label("New name:");
                     ui.text_edit_singleline(&mut self.new_name);
                     if ui.button("Rename").clicked() {
-                        if let Err(e) = parquet_examples::rename_column(df, &self.rename_column, &self.new_name) {
+                        if let Err(e) =
+                            parquet_examples::rename_column(df, &self.rename_column, &self.new_name)
+                        {
                             self.status = format!("Rename failed: {e}");
                         } else {
                             self.rename_column.clear();
@@ -766,20 +767,30 @@ impl eframe::App for ParquetApp {
                 });
                 ui.horizontal(|ui| {
                     if ui.button("Up").clicked() {
-                        if let Some(pos) = self.column_order.iter().position(|c| c == &self.rename_column) {
+                        if let Some(pos) = self
+                            .column_order
+                            .iter()
+                            .position(|c| c == &self.rename_column)
+                        {
                             if pos > 0 {
                                 self.column_order.swap(pos, pos - 1);
-                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok() {
+                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok()
+                                {
                                     self.refresh_dataframe_state(df);
                                 }
                             }
                         }
                     }
                     if ui.button("Down").clicked() {
-                        if let Some(pos) = self.column_order.iter().position(|c| c == &self.rename_column) {
+                        if let Some(pos) = self
+                            .column_order
+                            .iter()
+                            .position(|c| c == &self.rename_column)
+                        {
                             if pos + 1 < self.column_order.len() {
                                 self.column_order.swap(pos, pos + 1);
-                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok() {
+                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok()
+                                {
                                     self.refresh_dataframe_state(df);
                                 }
                             }
@@ -979,6 +990,9 @@ impl eframe::App for ParquetApp {
                         Ok(JobUpdate::Progress(p)) => {
                             self.progress = Some(p);
                         }
+                        Ok(JobUpdate::Done(JobResult::Count(c))) => {
+                            self.total_rows = c;
+                        }
                         Ok(JobUpdate::Done(JobResult::DataFrame(df))) => {
                             let prefetch = !self.busy;
                             let start_idx = if prefetch {
@@ -999,43 +1013,44 @@ impl eframe::App for ParquetApp {
                                         self.total_rows
                                     );
                                 } else if self.use_directory {
-                                        self.total_rows = df.height();
-                                        self.status = format!("Combined {} rows", df.height());
-                                    } else {
-                                        let ext = Path::new(&self.file_path)
-                                            .extension()
-                                            .and_then(|e| e.to_str())
-                                            .unwrap_or("")
-                                            .to_ascii_lowercase();
-                                        match ext.as_str() {
-                                            "csv" => {
-                                                self.total_rows = df.height();
-                                                self.status =
-                                                    format!("Loaded {} rows from CSV", df.height());
-                                            }
-                                            "json" => {
-                                                self.total_rows = df.height();
-                                                self.status =
-                                                    format!("Loaded {} rows from JSON", df.height());
-                                            }
-                                            _ => {
-                                                let end = (self.page_start + df.height())
-                                                    .min(self.total_rows);
-                                                self.status = format!(
-                                                    "Rows {}-{} of {}",
-                                                    self.page_start + 1,
-                                                    end,
-                                                    self.total_rows
-                                                );
-                                            }
+                                    self.total_rows = df.height();
+                                    self.status = format!("Combined {} rows", df.height());
+                                } else {
+                                    let ext = Path::new(&self.file_path)
+                                        .extension()
+                                        .and_then(|e| e.to_str())
+                                        .unwrap_or("")
+                                        .to_ascii_lowercase();
+                                    match ext.as_str() {
+                                        "csv" => {
+                                            self.total_rows = df.height();
+                                            self.status =
+                                                format!("Loaded {} rows from CSV", df.height());
+                                        }
+                                        "json" => {
+                                            self.total_rows = df.height();
+                                            self.status =
+                                                format!("Loaded {} rows from JSON", df.height());
+                                        }
+                                        _ => {
+                                            let end = (self.page_start + df.height())
+                                                .min(self.total_rows);
+                                            self.status = format!(
+                                                "Rows {}-{} of {}",
+                                                self.page_start + 1,
+                                                end,
+                                                self.total_rows
+                                            );
                                         }
                                     }
-                                    self.refresh_dataframe_state(&df);
-                                    self.edit_df = Some(df.clone());
+                                }
+                                self.refresh_dataframe_state(&df);
+                                self.edit_df = Some(df.clone());
                             }
 
                             self.page_cache.insert(start_idx, df.clone());
-                            if let Some(pos) = self.cache_order.iter().position(|&p| p == start_idx) {
+                            if let Some(pos) = self.cache_order.iter().position(|&p| p == start_idx)
+                            {
                                 self.cache_order.remove(pos);
                             }
                             self.cache_order.push_back(start_idx);
@@ -1047,7 +1062,9 @@ impl eframe::App for ParquetApp {
 
                             if !prefetch {
                                 let next_start = self.page_start + self.page_size;
-                                if next_start < self.total_rows && !self.page_cache.contains_key(&next_start) {
+                                if next_start < self.total_rows
+                                    && !self.page_cache.contains_key(&next_start)
+                                {
                                     let path = self.file_path.clone();
                                     let len = self.page_size;
                                     let exprs: Vec<String> = self
@@ -1070,9 +1087,22 @@ impl eframe::App for ParquetApp {
                                     self.prefetch_start = Some(next_start);
                                     self.runtime.spawn(async move {
                                         if exprs.is_empty() {
-                                            background::read_dataframe_slice(path, next_start as i64, len, tx).await;
+                                            background::read_dataframe_slice(
+                                                path,
+                                                next_start as i64,
+                                                len,
+                                                tx,
+                                            )
+                                            .await;
                                         } else {
-                                            background::read_filter_slice(path, exprs, next_start as i64, len, tx).await;
+                                            background::read_filter_slice(
+                                                path,
+                                                exprs,
+                                                next_start as i64,
+                                                len,
+                                                tx,
+                                            )
+                                            .await;
                                         }
                                     });
                                 }
@@ -1576,6 +1606,7 @@ mod tests {
                     app.result_rx = None;
                     match res {
                         Ok(JobUpdate::Progress(p)) => app.progress = Some(p),
+                        Ok(JobUpdate::Done(JobResult::Count(c))) => app.total_rows = c,
                         Ok(JobUpdate::Done(JobResult::DataFrame(df))) => app.edit_df = Some(df),
                         Ok(JobUpdate::Done(JobResult::Unit)) => app.status = "Done".into(),
                         Err(e) => app.status = format!("Failed: {e}"),
