@@ -1,13 +1,14 @@
 use anyhow::Result;
 use polars::prelude::*;
-use tokio::{task, time};
 use std::sync::mpsc::Sender;
+use tokio::{task, time};
 
 use crate::parquet_examples;
 
 /// Result returned by background jobs.
 pub enum JobResult {
     DataFrame(DataFrame),
+    Count(usize),
     Unit,
 }
 
@@ -52,12 +53,22 @@ async fn run_with_progress<T, F>(
 
 /// Asynchronously read a Parquet file into a [`DataFrame`].
 pub async fn read_dataframe(path: String, tx: Sender<anyhow::Result<JobUpdate>>) {
-    run_with_progress(tx, move || parquet_examples::read_parquet_to_dataframe(&path), JobResult::DataFrame).await;
+    run_with_progress(
+        tx,
+        move || parquet_examples::read_parquet_to_dataframe(&path),
+        JobResult::DataFrame,
+    )
+    .await;
 }
 
 /// Asynchronously read all Parquet files in a directory into a single [`DataFrame`].
 pub async fn read_directory(path: String, tx: Sender<anyhow::Result<JobUpdate>>) {
-    run_with_progress(tx, move || parquet_examples::read_parquet_directory(&path), JobResult::DataFrame).await;
+    run_with_progress(
+        tx,
+        move || parquet_examples::read_parquet_directory(&path),
+        JobResult::DataFrame,
+    )
+    .await;
 }
 
 /// Asynchronously read a CSV file into a [`DataFrame`].
@@ -94,7 +105,12 @@ pub async fn read_dataframe_slice(
     len: usize,
     tx: Sender<anyhow::Result<JobUpdate>>,
 ) {
-    run_with_progress(tx, move || parquet_examples::read_parquet_slice(&path, start, len), JobResult::DataFrame).await;
+    run_with_progress(
+        tx,
+        move || parquet_examples::read_parquet_slice(&path, start, len),
+        JobResult::DataFrame,
+    )
+    .await;
 }
 
 /// Asynchronously filter a Parquet file and return a slice of rows.
@@ -114,7 +130,11 @@ pub async fn read_filter_slice(
 }
 
 /// Asynchronously write a [`DataFrame`] to Parquet.
-pub async fn write_dataframe(mut df: DataFrame, path: String, tx: Sender<anyhow::Result<JobUpdate>>) {
+pub async fn write_dataframe(
+    mut df: DataFrame,
+    path: String,
+    tx: Sender<anyhow::Result<JobUpdate>>,
+) {
     run_with_progress(
         tx,
         move || {
@@ -127,6 +147,25 @@ pub async fn write_dataframe(mut df: DataFrame, path: String, tx: Sender<anyhow:
 }
 
 /// Asynchronously filter a Parquet file by multiple expressions.
-pub async fn filter_with_exprs(path: String, exprs: Vec<String>, tx: Sender<anyhow::Result<JobUpdate>>) {
-    run_with_progress(tx, move || parquet_examples::filter_with_exprs(&path, &exprs), JobResult::DataFrame).await;
+pub async fn filter_with_exprs(
+    path: String,
+    exprs: Vec<String>,
+    tx: Sender<anyhow::Result<JobUpdate>>,
+) {
+    run_with_progress(
+        tx,
+        move || parquet_examples::filter_with_exprs(&path, &exprs),
+        JobResult::DataFrame,
+    )
+    .await;
+}
+
+/// Asynchronously count rows matching multiple expressions.
+pub async fn filter_count(path: String, exprs: Vec<String>, tx: Sender<anyhow::Result<JobUpdate>>) {
+    run_with_progress(
+        tx,
+        move || parquet_examples::filter_count(&path, &exprs),
+        JobResult::Count,
+    )
+    .await;
 }
