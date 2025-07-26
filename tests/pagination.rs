@@ -174,3 +174,59 @@ fn paginate_filtered_contains() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn prefetch_reuses_cache() -> anyhow::Result<()> {
+    use std::collections::HashMap;
+
+    let dir = tempdir()?;
+    let file = dir.path().join("data.parquet");
+
+    let ids: Vec<i64> = (0..50).collect();
+    let names: Vec<String> = ids.iter().map(|i| format!("n{i}")).collect();
+    let mut df = df!("id" => ids, "name" => names)?;
+    parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut cache: HashMap<usize, DataFrame> = HashMap::new();
+
+    let (tx1, rx1) = std::sync::mpsc::channel();
+    rt.block_on(background::read_dataframe_slice(
+        file.to_str().unwrap().to_string(),
+        0,
+        20,
+        tx1,
+    ));
+    let df1 = loop {
+        if let Ok(msg) = rx1.recv() {
+            if let Ok(background::JobUpdate::Done(background::JobResult::DataFrame(df))) = msg {
+                break df;
+            }
+        }
+    };
+    cache.insert(0, df1);
+
+    let (tx2, rx2) = std::sync::mpsc::channel();
+    rt.block_on(background::read_dataframe_slice(
+        file.to_str().unwrap().to_string(),
+        20,
+        20,
+        tx2,
+    ));
+    let df2 = loop {
+        if let Ok(msg) = rx2.recv() {
+            if let Ok(background::JobUpdate::Done(background::JobResult::DataFrame(df))) = msg {
+                break df;
+            }
+        }
+    };
+    cache.insert(20, df2.clone());
+
+    if let Some(cached) = cache.get(&20) {
+        assert_eq!(cached.height(), 20);
+    } else {
+        panic!("page not cached");
+    }
+    assert_eq!(cache.len(), 2);
+    Ok(())
+}
