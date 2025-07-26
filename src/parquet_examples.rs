@@ -7,6 +7,7 @@
 use anyhow::Result;
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use shlex;
 use std::fs::File;
 
@@ -115,6 +116,115 @@ pub fn write_dataframe_to_json(df: &mut DataFrame, path: &str) -> Result<()> {
     let file = File::create(path)?;
     JsonWriter::new(file).finish(df)?;
     Ok(())
+}
+
+/// Example structs used to demonstrate Dremel encoded columns.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Foo {
+    pub a: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Bar {
+    pub x: bool,
+}
+
+/// Enum wrapping the different example structs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ExampleItem {
+    Foo(Foo),
+    Bar(Bar),
+}
+
+impl ExampleItem {
+    fn type_name(&self) -> &'static str {
+        match self {
+            ExampleItem::Foo(_) => "foo",
+            ExampleItem::Bar(_) => "bar",
+        }
+    }
+
+    fn from_parts(type_name: &str, json: &str) -> Result<Self> {
+        Ok(match type_name {
+            "foo" => ExampleItem::Foo(serde_json::from_str(json)?),
+            "bar" => ExampleItem::Bar(serde_json::from_str(json)?),
+            _ => anyhow::bail!("unknown type"),
+        })
+    }
+}
+
+/// Build a [`DataFrame`] containing list columns representing repeated structs.
+///
+/// The returned frame has two columns: `type` holding the struct name and
+/// `value` containing a JSON representation. Each cell of these columns is a
+/// list allowing an arbitrary number of structs per row.
+pub fn create_dremel_dataframe(rows: &[Vec<ExampleItem>]) -> Result<DataFrame> {
+    let mut type_lists: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+    let mut value_lists: Vec<Vec<String>> = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let mut types = Vec::with_capacity(row.len());
+        let mut values = Vec::with_capacity(row.len());
+        for item in row {
+            types.push(item.type_name().to_string());
+            values.push(serde_json::to_string(item)?);
+        }
+        type_lists.push(types);
+        value_lists.push(values);
+    }
+
+    use polars::prelude::ListChunked;
+
+    let type_series_vec: Vec<Option<Series>> = type_lists
+        .iter()
+        .map(|v| Some(Series::new("".into(), v.as_slice())))
+        .collect();
+    let value_series_vec: Vec<Option<Series>> = value_lists
+        .iter()
+        .map(|v| Some(Series::new("".into(), v.as_slice())))
+        .collect();
+
+    let mut type_list = ListChunked::from_iter(type_series_vec).into_series();
+    type_list.rename("type".into());
+    let mut value_list = ListChunked::from_iter(value_series_vec).into_series();
+    value_list.rename("value".into());
+    Ok(DataFrame::new(vec![type_list.into(), value_list.into()])?)
+}
+
+/// Convert a [`DataFrame`] produced by [`create_dremel_dataframe`] back into
+/// typed structs.
+pub fn dataframe_to_items(df: &DataFrame) -> Result<Vec<Vec<ExampleItem>>> {
+    let types = df.column("type")?.list()?;
+    let values = df.column("value")?.list()?;
+
+    let mut rows: Vec<Vec<ExampleItem>> = Vec::with_capacity(df.height());
+    for (t_opt, v_opt) in types.into_iter().zip(values.into_iter()) {
+        let t_series = t_opt.ok_or_else(|| PolarsError::NoData("null type".into()))?;
+        let v_series = v_opt.ok_or_else(|| PolarsError::NoData("null value".into()))?;
+        let t_iter = t_series.str()?;
+        let v_iter = v_series.str()?;
+        let row: Result<Vec<ExampleItem>> = t_iter
+            .into_no_null_iter()
+            .zip(v_iter.into_no_null_iter())
+            .map(|(t, v)| ExampleItem::from_parts(t, v))
+            .collect();
+        rows.push(row?);
+    }
+    Ok(rows)
+}
+
+/// Convenience helper which writes the provided structs as a Dremel encoded
+/// Parquet file.
+pub fn write_dremel_parquet(rows: &[Vec<ExampleItem>], path: &str) -> Result<()> {
+    let df = create_dremel_dataframe(rows)?;
+    let mut df = df.clone();
+    write_dataframe_to_parquet(&mut df, path)
+}
+
+/// Read a Dremel encoded Parquet file into typed structs.
+pub fn read_dremel_parquet(path: &str) -> Result<Vec<Vec<ExampleItem>>> {
+    let df = read_parquet_to_dataframe(path)?;
+    dataframe_to_items(&df)
 }
 
 /// Summarise a [`DataFrame`] returning row/column counts and basic statistics.
@@ -663,6 +773,22 @@ mod tests {
             .try_into_reader_with_file_path(Some(path.to_path_buf()))?
             .finish()?;
         assert_eq!(read.shape(), df.shape());
+        Ok(())
+    }
+
+    #[test]
+    fn dremel_round_trip() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("dremel.parquet");
+
+        let rows = vec![
+            vec![ExampleItem::Foo(Foo { a: 1 }), ExampleItem::Bar(Bar { x: true })],
+            vec![ExampleItem::Foo(Foo { a: 2 })],
+        ];
+        write_dremel_parquet(&rows, path.to_str().unwrap())?;
+
+        let read = read_dremel_parquet(path.to_str().unwrap())?;
+        assert_eq!(rows, read);
         Ok(())
     }
 }
