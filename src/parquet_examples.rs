@@ -421,6 +421,43 @@ pub fn read_parquet_slice(path: &str, start: i64, len: usize) -> Result<DataFram
     Ok(lf.collect()?)
 }
 
+/// Compute histogram counts for a slice of values.
+///
+/// Returns the bin counts along with the minimum value and bin step.
+pub fn compute_histogram(values: &[f64], bins: usize, range: Option<(f64, f64)>) -> (Vec<f64>, f64, f64) {
+    if bins == 0 {
+        return (Vec::new(), 0.0, 0.0);
+    }
+    if values.is_empty() {
+        return (vec![0.0; bins], 0.0, 0.0);
+    }
+
+    let (min, max) = match range {
+        Some(r) => r,
+        None => {
+            let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            (min, max)
+        }
+    };
+    let step = (max - min) / bins as f64;
+    let mut counts = vec![0f64; bins];
+    if step != 0.0 {
+        for &v in values {
+            let mut idx = ((v - min) / step).floor() as isize;
+            if idx < 0 {
+                idx = 0;
+            }
+            let mut i = idx as usize;
+            if i >= bins {
+                i = bins - 1;
+            }
+            counts[i] += 1.0;
+        }
+    }
+    (counts, min, step)
+}
+
 /// Filter rows in a Parquet file by a prefix on the `name` column.
 ///
 /// This demonstrates constructing an expression on a `LazyFrame` before
@@ -518,7 +555,7 @@ pub fn filter_slice(path: &str, exprs: &[String], start: i64, len: usize) -> Res
             lf = lf.filter(parse_simple_expr(ex)?);
         }
     }
-    let mut df = lf.slice(start, len as u32).collect()?;
+    let mut df = lf.collect()?;
     for (col, val) in contains {
         let series = df
             .column(&col)?
@@ -527,7 +564,7 @@ pub fn filter_slice(path: &str, exprs: &[String], start: i64, len: usize) -> Res
         let mask = series.str()?.contains_literal(&val)?;
         df = df.filter(&mask)?;
     }
-    Ok(df)
+    Ok(df.slice(start, len))
 }
 
 /// Return the number of rows matching multiple expressions without collecting them all.

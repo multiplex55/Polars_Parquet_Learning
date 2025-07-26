@@ -132,6 +132,15 @@ struct ParquetApp {
     #[cfg(feature = "plotting")]
     /// Type of plot to display
     plot_type: PlotType,
+    #[cfg(feature = "plotting")]
+    /// Number of bins for histogram plots
+    hist_bins: usize,
+    #[cfg(feature = "plotting")]
+    /// Optional x-axis range for plots
+    x_range: Option<(f64, f64)>,
+    #[cfg(feature = "plotting")]
+    /// Optional y-axis range for plots
+    y_range: Option<(f64, f64)>,
     /// Tokio runtime for background tasks
     runtime: tokio::runtime::Runtime,
     /// Receives updates from background jobs
@@ -185,6 +194,12 @@ impl Default for ParquetApp {
             plot_y_column: None,
             #[cfg(feature = "plotting")]
             plot_type: PlotType::default(),
+            #[cfg(feature = "plotting")]
+            hist_bins: 10,
+            #[cfg(feature = "plotting")]
+            x_range: None,
+            #[cfg(feature = "plotting")]
+            y_range: None,
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
             result_rx: None,
             metadata: None,
@@ -867,6 +882,36 @@ impl eframe::App for ParquetApp {
                         ui.radio_value(&mut self.plot_type, PlotType::Scatter, "Scatter");
                         ui.radio_value(&mut self.plot_type, PlotType::BoxPlot, "Box");
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Bins:");
+                        ui.add(egui::DragValue::new(&mut self.hist_bins).clamp_range(1..=100));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("X range:");
+                        let mut xmin = self.x_range.map(|r| r.0).unwrap_or(0.0);
+                        let mut xmax = self.x_range.map(|r| r.1).unwrap_or(0.0);
+                        ui.add(egui::DragValue::new(&mut xmin));
+                        ui.add(egui::DragValue::new(&mut xmax));
+                        if ui.button("Apply").clicked() {
+                            self.x_range = Some((xmin, xmax));
+                        }
+                        if ui.button("Clear").clicked() {
+                            self.x_range = None;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Y range:");
+                        let mut ymin = self.y_range.map(|r| r.0).unwrap_or(0.0);
+                        let mut ymax = self.y_range.map(|r| r.1).unwrap_or(0.0);
+                        ui.add(egui::DragValue::new(&mut ymin));
+                        ui.add(egui::DragValue::new(&mut ymax));
+                        if ui.button("Apply").clicked() {
+                            self.y_range = Some((ymin, ymax));
+                        }
+                        if ui.button("Clear").clicked() {
+                            self.y_range = None;
+                        }
+                    });
                     if let Some(col) = &self.plot_column {
                         if let Ok(series) = df.column(col) {
                             let values: Vec<f64> = series
@@ -881,22 +926,8 @@ impl eframe::App for ParquetApp {
                             if !values.is_empty() {
                                 match self.plot_type {
                                     PlotType::Histogram => {
-                                        let min =
-                                            values.iter().cloned().fold(f64::INFINITY, f64::min);
-                                        let max = values
-                                            .iter()
-                                            .cloned()
-                                            .fold(f64::NEG_INFINITY, f64::max);
-                                        let bins = 10usize;
-                                        let step = (max - min) / bins as f64;
-                                        let mut counts = vec![0f64; bins];
-                                        for v in values.iter() {
-                                            let mut idx = ((v - min) / step).floor() as usize;
-                                            if idx >= bins {
-                                                idx = bins - 1;
-                                            }
-                                            counts[idx] += 1.0;
-                                        }
+                                        let (counts, min, step) =
+                                            parquet_examples::compute_histogram(&values, self.hist_bins, self.x_range);
                                         let bars: Vec<_> = counts
                                             .iter()
                                             .enumerate()
@@ -907,7 +938,14 @@ impl eframe::App for ParquetApp {
                                                 )
                                             })
                                             .collect();
-                                        Plot::new("histogram").show(ui, |plot_ui| {
+                                        let mut plot = Plot::new("histogram");
+                                        if let Some((xmin, xmax)) = self.x_range {
+                                            plot = plot.default_x_bounds(xmin, xmax);
+                                        }
+                                        if let Some((ymin, ymax)) = self.y_range {
+                                            plot = plot.default_y_bounds(ymin, ymax);
+                                        }
+                                        plot.show(ui, |plot_ui| {
                                             plot_ui.bar_chart(BarChart::new("", bars));
                                         });
                                     }
@@ -917,7 +955,14 @@ impl eframe::App for ParquetApp {
                                             .enumerate()
                                             .map(|(i, v)| [i as f64, *v])
                                             .collect();
-                                        Plot::new("line").show(ui, |plot_ui| {
+                                        let mut plot = Plot::new("line");
+                                        if let Some((xmin, xmax)) = self.x_range {
+                                            plot = plot.default_x_bounds(xmin, xmax);
+                                        }
+                                        if let Some((ymin, ymax)) = self.y_range {
+                                            plot = plot.default_y_bounds(ymin, ymax);
+                                        }
+                                        plot.show(ui, |plot_ui| {
                                             plot_ui.line(Line::new("", points));
                                         });
                                     }
@@ -941,9 +986,15 @@ impl eframe::App for ParquetApp {
                                                     .zip(y_vals)
                                                     .map(|(x, y)| [x, y])
                                                     .collect();
-                                                Plot::new("scatter").show(ui, |plot_ui| {
-                                                    plot_ui
-                                                        .points(egui_plot::Points::new("", points));
+                                                let mut plot = Plot::new("scatter");
+                                                if let Some((xmin, xmax)) = self.x_range {
+                                                    plot = plot.default_x_bounds(xmin, xmax);
+                                                }
+                                                if let Some((ymin, ymax)) = self.y_range {
+                                                    plot = plot.default_y_bounds(ymin, ymax);
+                                                }
+                                                plot.show(ui, |plot_ui| {
+                                                    plot_ui.points(egui_plot::Points::new("", points));
                                                 });
                                             }
                                         }
@@ -961,7 +1012,14 @@ impl eframe::App for ParquetApp {
                                             let spread =
                                                 egui_plot::BoxSpread::new(min, q1, q2, q3, max);
                                             let elem = BoxElem::new(0.0, spread);
-                                            Plot::new("boxplot").show(ui, |plot_ui| {
+                                            let mut plot = Plot::new("boxplot");
+                                            if let Some((xmin, xmax)) = self.x_range {
+                                                plot = plot.default_x_bounds(xmin, xmax);
+                                            }
+                                            if let Some((ymin, ymax)) = self.y_range {
+                                                plot = plot.default_y_bounds(ymin, ymax);
+                                            }
+                                            plot.show(ui, |plot_ui| {
                                                 plot_ui.box_plot(BoxPlot::new("", vec![elem]));
                                             });
                                         }
