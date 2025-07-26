@@ -18,6 +18,8 @@ pub struct DataFrameSummary {
     pub rows: usize,
     /// Number of columns in the frame.
     pub columns: usize,
+    /// Approximate memory usage of the frame in bytes.
+    pub approx_bytes: usize,
     /// Simple statistics for each column.
     pub stats: DataFrame,
 }
@@ -274,6 +276,7 @@ pub fn summarize_dataframe(df: &DataFrame) -> Result<DataFrameSummary> {
     Ok(DataFrameSummary {
         rows: df.height(),
         columns: df.width(),
+        approx_bytes: df.estimated_size(),
         stats,
     })
 }

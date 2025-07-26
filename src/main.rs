@@ -621,11 +621,13 @@ impl eframe::App for ParquetApp {
             egui::SidePanel::right("preview_panel").show(ctx, |ui| {
                 ui.heading("Preview");
                 let end = (self.page_start + df.height()).min(self.total_rows);
+                let approx = df.estimated_size();
                 ui.label(format!(
-                    "Rows {}-{} of {}",
+                    "Rows {}-{} of {} (~{} bytes)",
                     self.page_start + 1,
                     end,
-                    self.total_rows
+                    self.total_rows,
+                    approx
                 ));
                 ui.horizontal(|ui| {
                     ui.label("Search:");
@@ -784,6 +786,7 @@ impl eframe::App for ParquetApp {
                     ui.label("Statistics");
                     ui.label(format!("Rows: {}", summary.rows));
                     ui.label(format!("Columns: {}", summary.columns));
+                    ui.label(format!("Approx size: {} bytes", summary.approx_bytes));
 
                     let stat_names: Vec<String> = summary
                         .stats
@@ -1468,6 +1471,11 @@ impl eframe::App for ParquetApp {
                 if let Some(meta) = &self.metadata {
                     ui.label("Metadata");
                     egui::Grid::new("meta_grid").striped(true).show(ui, |ui| {
+                        ui.label(format!(
+                            "File size: {} bytes",
+                            meta.file_metadata().total_byte_size()
+                        ));
+                        ui.end_row();
                         ui.label(format!("Row groups: {}", meta.num_row_groups()));
                         ui.end_row();
                         for (i, rg) in meta.row_groups().iter().enumerate() {
