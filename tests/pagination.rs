@@ -13,8 +13,34 @@ fn paginate_multiple_pages() -> anyhow::Result<()> {
     parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let res1 = rt.block_on(background::read_dataframe_slice(file.to_str().unwrap().to_string(), 0, 50))?;
-    let res2 = rt.block_on(background::read_dataframe_slice(file.to_str().unwrap().to_string(), 50, 50))?;
+    let (tx1, rx1) = std::sync::mpsc::channel();
+    rt.block_on(background::read_dataframe_slice(
+        file.to_str().unwrap().to_string(),
+        0,
+        50,
+        tx1,
+    ));
+    let res1 = loop {
+        if let Ok(msg) = rx1.recv() {
+            if let Ok(background::JobUpdate::Done(res)) = msg {
+                break res;
+            }
+        }
+    };
+    let (tx2, rx2) = std::sync::mpsc::channel();
+    rt.block_on(background::read_dataframe_slice(
+        file.to_str().unwrap().to_string(),
+        50,
+        50,
+        tx2,
+    ));
+    let res2 = loop {
+        if let Ok(msg) = rx2.recv() {
+            if let Ok(background::JobUpdate::Done(res)) = msg {
+                break res;
+            }
+        }
+    };
     if let background::JobResult::DataFrame(df1) = res1 {
         assert_eq!(df1.height(), 50);
     } else { panic!("unexpected result") }
