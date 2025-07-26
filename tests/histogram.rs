@@ -8,3 +8,12 @@ fn histogram_respects_bins() {
     let total: f64 = counts.iter().sum();
     assert_eq!(total as usize, values.len());
 }
+
+#[test]
+fn histogram_constant_values() {
+    let values = vec![1.0, 1.0, 1.0, 1.0];
+    let (counts, _min, _step) = compute_histogram(&values, 3, None);
+    assert_eq!(counts.len(), 3);
+    assert_eq!(counts[0] as usize, values.len());
+    assert!(counts[1..].iter().all(|&c| c == 0.0));
+}
