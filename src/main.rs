@@ -15,9 +15,9 @@ use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
 use rfd::FileDialog;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::mpsc;
-use std::collections::HashMap;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -332,6 +332,55 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
     DataFrame::new(cols).map_err(|e| e.into())
 }
 
+fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> anyhow::Result<()> {
+    use polars::prelude::*;
+    use polars::utils::IdxSize;
+    let dtype = df.dtypes()[col].clone();
+    df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+        let series = match dtype {
+            DataType::Int64 => {
+                let ca = c.i64()?;
+                let val = value.parse::<i64>()?;
+                ca.scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series()
+            }
+            DataType::Float64 => {
+                let ca = c.f64()?;
+                let val = value.parse::<f64>()?;
+                ca.scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series()
+            }
+            DataType::Boolean => {
+                let ca = c.bool()?;
+                let val = matches!(value.to_lowercase().as_str(), "true" | "1");
+                ca.scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series()
+            }
+            DataType::String => {
+                let ca = c.str()?;
+                ca.scatter_single(vec![row as IdxSize], Some(value))?
+                    .into_series()
+            }
+            _ => c.clone(),
+        };
+        Ok(series)
+    })?;
+    Ok(())
+}
+
+fn dataframe_to_rows(df: &DataFrame) -> Vec<Vec<String>> {
+    let mut rows = Vec::with_capacity(df.height());
+    for row_idx in 0..df.height() {
+        let mut row = Vec::with_capacity(df.width());
+        for col in df.get_columns() {
+            let val = col.get(row_idx).map(|v| v.to_string()).unwrap_or_default();
+            row.push(val);
+        }
+        rows.push(row);
+    }
+    rows
+}
+
 impl ParquetApp {
     /// Spawn a background task to read the current `file_path`.
     fn start_read(&mut self) {
@@ -503,16 +552,48 @@ impl eframe::App for ParquetApp {
                     .body(|mut body| {
                         for row_idx in 0..head.height() {
                             body.row(18.0, |mut row| {
-                                for col in head.get_columns() {
-                                    let val =
-                                        col.get(row_idx).map(|v| v.to_string()).unwrap_or_default();
-                                    row.col(|ui| {
-                                        ui.label(val);
+                                for (col_idx, col) in df.get_columns().iter().enumerate() {
+                                    let dtype = col.dtype();
+                                    let cell = &mut self.rows[row_idx][col_idx];
+                                    row.col(|ui| match dtype {
+                                        DataType::Boolean => {
+                                            let mut checked = matches!(cell.as_str(), "true" | "1");
+                                            if ui.checkbox(&mut checked, "").changed() {
+                                                *cell = checked.to_string();
+                                                if let Err(e) =
+                                                    set_cell_value(df, row_idx, col_idx, cell)
+                                                {
+                                                    self.status = format!("Edit failed: {e}");
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            let resp = ui.text_edit_singleline(cell);
+                                            if resp.lost_focus() && resp.changed() {
+                                                if let Err(e) =
+                                                    set_cell_value(df, row_idx, col_idx, cell)
+                                                {
+                                                    self.status = format!("Edit failed: {e}");
+                                                }
+                                            }
+                                        }
                                     });
                                 }
                             });
                         }
                     });
+                if ui.button("Save changes").clicked() {
+                    let df = df.clone();
+                    let file = self.file_path.clone();
+                    let (tx, rx) = mpsc::channel();
+                    self.result_rx = Some(rx);
+                    self.busy = true;
+                    self.status = "Saving...".into();
+                    self.runtime.spawn(async move {
+                        let res = background::write_dataframe(df, file).await;
+                        let _ = tx.send(res);
+                    });
+                }
 
                 if let Ok(summary) = parquet_examples::summarize_dataframe(df) {
                     ui.separator();
@@ -779,6 +860,7 @@ impl eframe::App for ParquetApp {
                                     .iter()
                                     .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                     .collect();
+                                self.rows = dataframe_to_rows(&df);
                                 self.edit_df = Some(df);
                             }
                             Ok(JobResult::Unit) => {
@@ -977,8 +1059,16 @@ impl eframe::App for ParquetApp {
                                     FilterOp::Contains => "contains",
                                 })
                                 .show_ui(ui, |ui| {
-                                    changed |= ui.selectable_value(&mut filter.op, FilterOp::Equals, "=").changed();
-                                    changed |= ui.selectable_value(&mut filter.op, FilterOp::Contains, "contains").changed();
+                                    changed |= ui
+                                        .selectable_value(&mut filter.op, FilterOp::Equals, "=")
+                                        .changed();
+                                    changed |= ui
+                                        .selectable_value(
+                                            &mut filter.op,
+                                            FilterOp::Contains,
+                                            "contains",
+                                        )
+                                        .changed();
                                 });
                             changed |= ui.text_edit_singleline(&mut filter.value).changed();
                         });
@@ -1057,6 +1147,7 @@ impl eframe::App for ParquetApp {
                                                 .iter()
                                                 .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                                 .collect();
+                                            self.rows = dataframe_to_rows(&df);
                                             self.edit_df = Some(df);
                                         }
                                         Err(e) => self.status = format!("Failed to convert: {e}"),
@@ -1141,6 +1232,7 @@ impl eframe::App for ParquetApp {
                                 .iter()
                                 .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                 .collect();
+                            self.rows = dataframe_to_rows(&df);
                             self.edit_df = Some(df);
                         }
                         Err(e) => self.status = format!("Create failed: {e}"),
@@ -1195,6 +1287,7 @@ impl eframe::App for ParquetApp {
                                         .iter()
                                         .map(|(n, _)| (n.clone(), ColumnFilter::default()))
                                         .collect();
+                                    self.rows = dataframe_to_rows(&df);
                                     self.edit_df = Some(df);
                                 }
                                 Err(e) => self.status = format!("Query failed: {e}"),
@@ -1305,5 +1398,31 @@ mod tests {
         assert!(!app.busy);
         assert!(app.result_rx.is_none());
         assert_eq!(app.status, "Background task disconnected");
+    }
+
+    #[test]
+    fn build_dataframe_propagates_edits() {
+        let schema = vec![
+            ("id".to_string(), DataType::Int64),
+            ("name".to_string(), DataType::String),
+        ];
+        let mut rows = vec![
+            vec!["1".to_string(), "Alice".to_string()],
+            vec!["2".to_string(), "Bob".to_string()],
+        ];
+        let df1 = build_dataframe(&schema, &rows).unwrap();
+        assert_eq!(
+            df1.column("name").unwrap().str().unwrap().get(1),
+            Some("Bob")
+        );
+        rows[1][1] = "Charlie".to_string();
+        let df2 = build_dataframe(&schema, &rows).unwrap();
+        assert_eq!(
+            df2.column("name").unwrap().str().unwrap().get(1),
+            Some("Charlie")
+        );
+        rows[0][0] = "10".to_string();
+        let df3 = build_dataframe(&schema, &rows).unwrap();
+        assert_eq!(df3.column("id").unwrap().i64().unwrap().get(0), Some(10));
     }
 }
