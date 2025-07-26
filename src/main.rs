@@ -568,6 +568,15 @@ impl eframe::App for ParquetApp {
                     });
                 }
                 ui.horizontal(|ui| {
+                    ui.label("Page size:");
+                    if ui
+                        .add(egui::DragValue::new(&mut self.page_size).clamp_range(1..=1000))
+                        .changed()
+                    {
+                        self.load_page();
+                    }
+                });
+                ui.horizontal(|ui| {
                     ui.label("Rows to display:");
                     ui.add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000));
                     if ui.button("Toggle schema").clicked() {
