@@ -167,7 +167,11 @@ pub fn create_dremel_dataframe(rows: &[Vec<ExampleItem>]) -> Result<DataFrame> {
         let mut values = Vec::with_capacity(row.len());
         for item in row {
             types.push(item.type_name().to_string());
-            values.push(serde_json::to_string(item)?);
+            let json = match item {
+                ExampleItem::Foo(f) => serde_json::to_string(f)?,
+                ExampleItem::Bar(b) => serde_json::to_string(b)?,
+            };
+            values.push(json);
         }
         type_lists.push(types);
         value_lists.push(values);
