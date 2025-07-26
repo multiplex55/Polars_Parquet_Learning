@@ -310,6 +310,29 @@ pub fn create_dataframe(
     Ok(DataFrame::new(cols)?)
 }
 
+/// Rename a column in the [`DataFrame`].
+pub fn rename_column(df: &mut DataFrame, old: &str, new: &str) -> Result<()> {
+    df.rename(old, new.into())?;
+    Ok(())
+}
+
+/// Drop a column from the [`DataFrame`].
+pub fn drop_column(df: &mut DataFrame, name: &str) -> Result<()> {
+    df.drop_in_place(name)?;
+    Ok(())
+}
+
+/// Reorder columns in the [`DataFrame`] according to the provided names.
+pub fn reorder_columns(df: &mut DataFrame, order: &[String]) -> Result<()> {
+    use polars::prelude::Column;
+    let mut cols: Vec<Column> = Vec::with_capacity(order.len());
+    for name in order {
+        cols.push(df.column(name)?.clone());
+    }
+    *df = DataFrame::new(cols)?;
+    Ok(())
+}
+
 /// Write the [`DataFrame`] grouped by one or more columns into separate Parquet files.
 ///
 /// For a single column this writes `dir/<value>.parquet`. When multiple columns
@@ -394,8 +417,7 @@ pub fn read_selected_columns(path: &str, columns: &[&str]) -> Result<DataFrame> 
 /// the result.  `start` is the zero-based offset of the first row and
 /// `len` is the number of rows to return.
 pub fn read_parquet_slice(path: &str, start: i64, len: usize) -> Result<DataFrame> {
-    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?
-        .slice(start, len as u32);
+    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?.slice(start, len as u32);
     Ok(lf.collect()?)
 }
 
@@ -473,7 +495,10 @@ pub fn filter_with_exprs(path: &str, exprs: &[String]) -> Result<DataFrame> {
     }
     let mut df = lf.collect()?;
     for (col, val) in contains {
-        let series = df.column(&col)?.as_series().ok_or_else(|| anyhow::anyhow!("missing series"))?;
+        let series = df
+            .column(&col)?
+            .as_series()
+            .ok_or_else(|| anyhow::anyhow!("missing series"))?;
         let mask = series.str()?.contains_literal(&val)?;
         df = df.filter(&mask)?;
     }
@@ -840,7 +865,10 @@ mod tests {
         let path = dir.path().join("dremel.parquet");
 
         let rows = vec![
-            vec![ExampleItem::Foo(Foo { a: 1 }), ExampleItem::Bar(Bar { x: true })],
+            vec![
+                ExampleItem::Foo(Foo { a: 1 }),
+                ExampleItem::Bar(Bar { x: true }),
+            ],
             vec![ExampleItem::Foo(Foo { a: 2 })],
         ];
         write_dremel_parquet(&rows, path.to_str().unwrap())?;

@@ -88,6 +88,12 @@ struct ParquetApp {
     schema: Vec<(String, polars::prelude::DataType)>,
     /// Working rows for the DataFrame editor
     rows: Vec<Vec<String>>,
+    /// Selected column for rename/reorder operations
+    rename_column: String,
+    /// New name when renaming a column
+    new_name: String,
+    /// Current order of columns
+    column_order: Vec<String>,
     /// Temporary inputs for adding columns
     new_col_name: String,
     new_col_type: String,
@@ -149,6 +155,9 @@ impl Default for ParquetApp {
             edit_df: None,
             schema: Vec::new(),
             rows: Vec::new(),
+            rename_column: String::new(),
+            new_name: String::new(),
+            column_order: Vec::new(),
             new_col_name: String::new(),
             new_col_type: String::new(),
             partition_column: None,
@@ -468,6 +477,27 @@ impl ParquetApp {
             }
         });
     }
+
+    /// Refresh internal state after the DataFrame has changed.
+    fn refresh_dataframe_state(&mut self, df: &DataFrame) {
+        self.loaded_schema = df
+            .get_column_names()
+            .into_iter()
+            .zip(df.dtypes())
+            .map(|(n, t)| (n.to_string(), t))
+            .collect();
+        self.column_filters = self
+            .loaded_schema
+            .iter()
+            .map(|(n, _)| (n.clone(), ColumnFilter::default()))
+            .collect();
+        self.rows = dataframe_to_rows(df);
+        self.column_order = df
+            .get_column_names()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    }
 }
 
 impl eframe::App for ParquetApp {
@@ -638,6 +668,74 @@ impl eframe::App for ParquetApp {
                                 });
                             }
                         });
+                }
+
+
+                ui.separator();
+                ui.label("Column operations");
+                egui::ComboBox::from_label("Column")
+                    .selected_text(
+                        if self.rename_column.is_empty() {
+                            "Select".to_string()
+                        } else {
+                            self.rename_column.clone()
+                        },
+                    )
+                    .show_ui(ui, |ui| {
+                        for name in df.get_column_names_str() {
+                            ui.selectable_value(&mut self.rename_column, name.to_string(), name);
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    ui.label("New name:");
+                    ui.text_edit_singleline(&mut self.new_name);
+                    if ui.button("Rename").clicked() {
+                        if let Err(e) = parquet_examples::rename_column(df, &self.rename_column, &self.new_name) {
+                            self.status = format!("Rename failed: {e}");
+                        } else {
+                            self.rename_column.clear();
+                            self.new_name.clear();
+                            self.refresh_dataframe_state(df);
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Up").clicked() {
+                        if let Some(pos) = self.column_order.iter().position(|c| c == &self.rename_column) {
+                            if pos > 0 {
+                                self.column_order.swap(pos, pos - 1);
+                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok() {
+                                    self.refresh_dataframe_state(df);
+                                }
+                            }
+                        }
+                    }
+                    if ui.button("Down").clicked() {
+                        if let Some(pos) = self.column_order.iter().position(|c| c == &self.rename_column) {
+                            if pos + 1 < self.column_order.len() {
+                                self.column_order.swap(pos, pos + 1);
+                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok() {
+                                    self.refresh_dataframe_state(df);
+                                }
+                            }
+                        }
+                    }
+                });
+                ui.label("Drop columns:");
+                let mut drops: Vec<String> = Vec::new();
+                for name in df.get_column_names_str() {
+                    let mut mark = false;
+                    if ui.checkbox(&mut mark, name).clicked() && mark {
+                        drops.push(name.to_string());
+                    }
+                }
+                if !drops.is_empty() {
+                    for d in &drops {
+                        if parquet_examples::drop_column(df, d).is_ok() {
+                            self.column_order.retain(|c| c != d);
+                        }
+                    }
+                    self.refresh_dataframe_state(df);
                 }
 
                 #[cfg(feature = "plotting")]
@@ -855,18 +953,7 @@ impl eframe::App for ParquetApp {
                                         }
                                     }
                                 }
-                                self.loaded_schema = df
-                                    .get_column_names()
-                                    .into_iter()
-                                    .zip(df.dtypes())
-                                    .map(|(n, t)| (n.to_string(), t))
-                                    .collect();
-                                self.column_filters = self
-                                    .loaded_schema
-                                    .iter()
-                                    .map(|(n, _)| (n.clone(), ColumnFilter::default()))
-                                    .collect();
-                                self.rows = dataframe_to_rows(&df);
+                                self.refresh_dataframe_state(&df);
                                 self.edit_df = Some(df);
                             }
                         }
@@ -1155,18 +1242,7 @@ impl eframe::App for ParquetApp {
                                     match parquet_examples::records_to_dataframe(&rec) {
                                         Ok(df) => {
                                             self.status = "Modified records".into();
-                                            self.loaded_schema = df
-                                                .get_column_names()
-                                                .into_iter()
-                                                .zip(df.dtypes())
-                                                .map(|(n, t)| (n.to_string(), t))
-                                                .collect();
-                                            self.column_filters = self
-                                                .loaded_schema
-                                                .iter()
-                                                .map(|(n, _)| (n.clone(), ColumnFilter::default()))
-                                                .collect();
-                                            self.rows = dataframe_to_rows(&df);
+                                            self.refresh_dataframe_state(&df);
                                             self.edit_df = Some(df);
                                         }
                                         Err(e) => self.status = format!("Failed to convert: {e}"),
@@ -1240,18 +1316,7 @@ impl eframe::App for ParquetApp {
                                     Err(e) => self.status = format!("Save failed: {e}"),
                                 }
                             }
-                            self.loaded_schema = df
-                                .get_column_names()
-                                .into_iter()
-                                .zip(df.dtypes())
-                                .map(|(n, t)| (n.to_string(), t))
-                                .collect();
-                            self.column_filters = self
-                                .loaded_schema
-                                .iter()
-                                .map(|(n, _)| (n.clone(), ColumnFilter::default()))
-                                .collect();
-                            self.rows = dataframe_to_rows(&df);
+                            self.refresh_dataframe_state(&df);
                             self.edit_df = Some(df);
                         }
                         Err(e) => self.status = format!("Create failed: {e}"),
@@ -1295,18 +1360,7 @@ impl eframe::App for ParquetApp {
                             match res {
                                 Ok(df) => {
                                     self.status = format!("Query returned {} rows", df.height());
-                                    self.loaded_schema = df
-                                        .get_column_names()
-                                        .into_iter()
-                                        .zip(df.dtypes())
-                                        .map(|(n, t)| (n.to_string(), t))
-                                        .collect();
-                                    self.column_filters = self
-                                        .loaded_schema
-                                        .iter()
-                                        .map(|(n, _)| (n.clone(), ColumnFilter::default()))
-                                        .collect();
-                                    self.rows = dataframe_to_rows(&df);
+                                    self.refresh_dataframe_state(&df);
                                     self.edit_df = Some(df);
                                 }
                                 Err(e) => self.status = format!("Query failed: {e}"),
