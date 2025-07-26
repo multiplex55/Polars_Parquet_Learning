@@ -434,13 +434,32 @@ impl ParquetApp {
         let path = self.file_path.clone();
         let start = self.page_start as i64;
         let len = self.page_size;
+        let exprs: Vec<String> = self
+            .column_filters
+            .iter()
+            .filter_map(|(name, f)| {
+                if f.value.trim().is_empty() {
+                    None
+                } else {
+                    let op = match f.op {
+                        FilterOp::Equals => "==",
+                        FilterOp::Contains => "contains",
+                    };
+                    Some(format!("{} {} \"{}\"", name, op, f.value))
+                }
+            })
+            .collect();
         let (tx, rx) = mpsc::channel();
         self.result_rx = Some(rx);
         self.busy = true;
         self.progress = Some(0.0);
         self.status = "Reading...".into();
         self.runtime.spawn(async move {
-            background::read_dataframe_slice(path, start, len, tx).await;
+            if exprs.is_empty() {
+                background::read_dataframe_slice(path, start, len, tx).await;
+            } else {
+                background::read_filter_slice(path, exprs, start, len, tx).await;
+            }
         });
     }
 
@@ -448,6 +467,7 @@ impl ParquetApp {
     fn apply_filters(&mut self) {
         let path = self.file_path.clone();
         let len = self.page_size;
+        let start = self.page_start as i64;
         let exprs: Vec<String> = self
             .column_filters
             .iter()
@@ -469,11 +489,19 @@ impl ParquetApp {
         self.progress = Some(0.0);
         self.page_start = 0;
         self.status = "Filtering...".into();
+        let count = if exprs.is_empty() {
+            self.total_rows
+        } else {
+            parquet_examples::filter_with_exprs(&path, &exprs)
+                .map(|df| df.height())
+                .unwrap_or(0)
+        };
+        self.total_rows = count;
         self.runtime.spawn(async move {
             if exprs.is_empty() {
-                background::read_dataframe_slice(path, 0, len, tx).await;
+                background::read_dataframe_slice(path, start, len, tx).await;
             } else {
-                background::filter_with_exprs(path, exprs, tx).await;
+                background::read_filter_slice(path, exprs, start, len, tx).await;
             }
         });
     }
@@ -919,9 +947,14 @@ impl eframe::App for ParquetApp {
                             self.result_rx = None;
                             self.progress = None;
                             if self.status.starts_with("Filtering") {
-                                self.total_rows = df.height();
-                                self.status = format!("Filtered to {} rows", df.height());
-                                } else if self.use_directory {
+                                let end = (self.page_start + df.height()).min(self.total_rows);
+                                self.status = format!(
+                                    "Rows {}-{} of {}",
+                                    self.page_start + 1,
+                                    end,
+                                    self.total_rows
+                                );
+                            } else if self.use_directory {
                                     self.total_rows = df.height();
                                     self.status = format!("Combined {} rows", df.height());
                                 } else {
