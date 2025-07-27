@@ -189,6 +189,47 @@ fn paginate_filtered_contains() -> anyhow::Result<()> {
 }
 
 #[test]
+fn paginate_filtered_quotes() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let file = dir.path().join("data.parquet");
+
+    let mut df = df!("name" => ["Ann \"The Hammer\"", "Bob"])?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        Compression::SNAPPY,
+    )?;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let exprs = vec![format!(
+        "name == {}",
+        parquet_examples::quote_expr_value("Ann \"The Hammer\"")
+    )];
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    rt.block_on(background::read_filter_slice(
+        file.to_str().unwrap().to_string(),
+        exprs.clone(),
+        0,
+        10,
+        tx,
+    ));
+    let res = loop {
+        if let Ok(msg) = rx.recv() {
+            if let Ok(background::JobUpdate::Done(res)) = msg {
+                break res;
+            }
+        }
+    };
+    if let background::JobResult::DataFrame(df) = res {
+        assert_eq!(df.height(), 1);
+    } else {
+        panic!("unexpected result");
+    }
+    Ok(())
+}
+
+#[test]
 fn prefetch_reuses_cache() -> anyhow::Result<()> {
     use std::collections::HashMap;
 
