@@ -18,12 +18,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_derive = "1.0"
 
 # GUI framework built on egui
-eframe = { version = "0.32", optional = true, default-features = false, features = ["glow"] }
-egui = { version = "0.32", optional = true }
-egui_extras = { version = "0.32", optional = true }
+eframe = { version = "0.32", default-features = false, features = ["glow", "x11", "wayland"] }
+egui = { version = "0.32" }
+egui_extras = { version = "0.32" }
 
 # Native file dialogs
-rfd = { version = "0.15", optional = true }
+rfd = { version = "0.15" }
 
 # Simplified error handling
 anyhow = "1.0"
@@ -35,16 +35,10 @@ clap = { version = "4", features = ["derive"] }
 serde_json = "1.0"
 
 # Optional plotting support
-egui_plot = { version = "0.33", optional = true }
-
-[features]
-plotting = ["dep:egui_plot"]
-gui = ["dep:eframe", "dep:egui", "dep:egui_extras", "dep:rfd"]
-default = []
+egui_plot = { version = "0.33" }
 
 [[bin]]
 name = "Polars_Parquet_Learning"
-required-features = ["gui"]
 
 [dev-dependencies]
 tempfile = "3"

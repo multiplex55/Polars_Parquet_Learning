@@ -8,16 +8,11 @@ basic read/modify/write cycle.
 ## Building and running
 
 This project uses the Rust 2024 edition.  A recent stable toolchain is
-recommended.  To compile everything and launch the GUI:
+recommended.  To compile everything and launch the GUI with plotting support
+enabled by default:
 
 ```bash
 cargo run
-```
-
-To include the optional chart viewer compile with the `plotting` feature:
-
-```bash
-cargo run --features plotting
 ```
 
 For release builds use `cargo build --release` followed by the generated binary
@@ -60,7 +55,7 @@ button. Files can also be dragged onto the window to automatically populate the
 path. All heavy lifting is handled by Polars; the GUI simply wires the chosen
 action to the example functions.
 
-Enabling the `plotting` feature will add a simple chart viewer using
+The application includes a simple chart viewer using
 [`egui_plot`](https://crates.io/crates/egui_plot). A drop-down in the preview
 panel lets you pick one or two numeric columns and choose between histogram,
 line, scatter or box plots for that data.
