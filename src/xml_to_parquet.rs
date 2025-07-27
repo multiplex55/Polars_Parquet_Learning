@@ -3,7 +3,7 @@ use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Field {
     #[serde(rename = "@name")]
     pub name: String,
@@ -11,7 +11,7 @@ pub struct Field {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Template {
     #[serde(rename = "@id")]
     pub id: u32,
@@ -21,13 +21,13 @@ pub struct Template {
     pub fields: Vec<Field>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Part {
     #[serde(rename = "@content")]
     pub content: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Message {
     #[serde(rename = "@id")]
     pub id: u32,
@@ -37,7 +37,7 @@ pub struct Message {
     pub parts: Vec<Part>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct Repository {
     #[serde(rename = "@id")]
     pub id: u32,
@@ -45,7 +45,7 @@ pub struct Repository {
     pub path: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename = "root")]
 pub struct Root {
     #[serde(rename = "template", default)]
@@ -129,7 +129,11 @@ struct ExportSchema {
     foreign_keys: Vec<ForeignKey>,
 }
 
-pub fn write_tables(tables: &BTreeMap<&str, DataFrame>, output_dir: &str, write_schema: bool) -> Result<()> {
+pub fn write_tables(
+    tables: &BTreeMap<&str, DataFrame>,
+    output_dir: &str,
+    write_schema: bool,
+) -> Result<()> {
     use std::fs::File;
     use std::path::Path;
     std::fs::create_dir_all(output_dir)?;
@@ -171,4 +175,3 @@ pub fn xml_to_parquet(input: &str, output_dir: &str, write_schema: bool) -> Resu
     let tables = flatten_to_tables(&root)?;
     write_tables(&tables, output_dir, write_schema)
 }
-

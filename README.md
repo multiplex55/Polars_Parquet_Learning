@@ -146,3 +146,10 @@ The GUI offers the same functionality via the **XML** mode. Select an input
 file in the **File** field, choose an output directory in **Save** and decide
 whether to write a `_schema.json` using the checkbox before clicking **Run**.
 
+Additional helper functions in [`src/xml_examples.rs`](src/xml_examples.rs)
+demonstrate a full round trip using the bundled
+[`sample.xml`](tests/fixtures/sample.xml). They parse the XML into a `Root`,
+convert it to `DataFrame`s, write them as Parquet files, read the tables back
+into a `Root` and finally serialize it to an XML string again. See
+[`tests/xml_round_trip.rs`](tests/xml_round_trip.rs) for usage.
+
