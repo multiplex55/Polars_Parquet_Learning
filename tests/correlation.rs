@@ -1,4 +1,4 @@
-use Polars_Parquet_Learning::parquet_examples::correlation_matrix;
+use polars_parquet_learning::parquet_examples::correlation_matrix;
 use polars::prelude::*;
 
 #[test]

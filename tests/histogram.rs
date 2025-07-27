@@ -1,4 +1,4 @@
-use Polars_Parquet_Learning::parquet_examples::compute_histogram;
+use polars_parquet_learning::parquet_examples::compute_histogram;
 
 #[test]
 fn histogram_respects_bins() {

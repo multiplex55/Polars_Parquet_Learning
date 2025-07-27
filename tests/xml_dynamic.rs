@@ -1,5 +1,5 @@
 use polars::prelude::*;
-use Polars_Parquet_Learning::xml_dynamic::{parse_any_xml, value_to_tables};
+use polars_parquet_learning::xml_dynamic::{parse_any_xml, value_to_tables};
 
 #[test]
 fn parse_sample_xml() -> anyhow::Result<()> {

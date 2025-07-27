@@ -1,7 +1,7 @@
 use polars::prelude::*;
 use tempfile::tempdir;
 
-use Polars_Parquet_Learning::xml_to_parquet::{flatten_to_tables, parse_xml, write_tables};
+use polars_parquet_learning::xml_to_parquet::{flatten_to_tables, parse_xml, write_tables};
 
 #[test]
 fn xml_round_trip() -> anyhow::Result<()> {

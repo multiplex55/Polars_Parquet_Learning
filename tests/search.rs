@@ -1,4 +1,4 @@
-use Polars_Parquet_Learning::search::{find_matches, next_index, prev_index};
+use polars_parquet_learning::search::{find_matches, next_index, prev_index};
 
 #[test]
 fn navigate_matches_cycles() {

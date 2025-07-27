@@ -16,7 +16,7 @@ cargo run
 ```
 
 For release builds use `cargo build --release` followed by the generated binary
-in `target/release/Polars_Parquet_Learning`.
+in `target/release/polars_parquet_learning`.
 
 ## Example workflow
 
