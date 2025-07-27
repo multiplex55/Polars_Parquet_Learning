@@ -407,6 +407,40 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 ca.scatter_single(vec![row as IdxSize], Some(value))?
                     .into_series()
             }
+            DataType::Date => {
+                use chrono::NaiveDate;
+                let ca = c.date()?;
+                let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+                let d = NaiveDate::parse_from_str(value, "%Y-%m-%d")?;
+                let days = (d - epoch).num_days() as i32;
+                ca.scatter_single(vec![row as IdxSize], Some(days))?
+                    .into_series()
+            }
+            DataType::Datetime(_, _) => {
+                use chrono::{DateTime, NaiveDateTime};
+                let ca = c.datetime()?;
+                let ts = DateTime::parse_from_rfc3339(value)
+                    .map(|dt| dt.timestamp_micros())
+                    .or_else(|_| {
+                        NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+                            .or_else(|_| NaiveDateTime::parse_from_str(
+                                value,
+                                "%Y-%m-%dT%H:%M:%S",
+                            ))
+                            .map(|dt| dt.timestamp_micros())
+                    })?;
+                ca.scatter_single(vec![row as IdxSize], Some(ts))?
+                    .into_series()
+            }
+            DataType::Time => {
+                use chrono::{NaiveTime, Timelike};
+                let ca = c.time()?;
+                let t = NaiveTime::parse_from_str(value, "%H:%M:%S")?;
+                let ns = (t.num_seconds_from_midnight() as i64) * 1_000_000_000
+                    + t.nanosecond() as i64;
+                ca.scatter_single(vec![row as IdxSize], Some(ns))?
+                    .into_series()
+            }
             _ => c.clone(),
         };
         Ok(series)
@@ -1785,5 +1819,44 @@ mod tests {
         rows[0][0] = "10".to_string();
         let df3 = build_dataframe(&schema, &rows).unwrap();
         assert_eq!(df3.column("id").unwrap().i64().unwrap().get(0), Some(10));
+    }
+
+    #[test]
+    fn set_cell_value_updates_date() {
+        let schema = vec![("when".to_string(), DataType::Date)];
+        let rows = vec![vec!["2024-01-01".to_string()]];
+        let mut df = build_dataframe(&schema, &rows).unwrap();
+        set_cell_value(&mut df, 0, 0, "2024-06-15").unwrap();
+        use chrono::NaiveDate;
+        let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
+        let nd = NaiveDate::parse_from_str("2024-06-15", "%Y-%m-%d").unwrap();
+        let expected = (nd - epoch).num_days() as i32;
+        assert_eq!(df.column("when").unwrap().date().unwrap().get(0), Some(expected));
+    }
+
+    #[test]
+    fn set_cell_value_updates_datetime() {
+        let schema = vec![
+            ("ts".to_string(), DataType::Datetime(TimeUnit::Microseconds, None)),
+        ];
+        let rows = vec![vec!["2024-01-01T00:00:00".to_string()]];
+        let mut df = build_dataframe(&schema, &rows).unwrap();
+        set_cell_value(&mut df, 0, 0, "2024-01-01 12:34:56").unwrap();
+        use chrono::NaiveDateTime;
+        let ndt = NaiveDateTime::parse_from_str("2024-01-01 12:34:56", "%Y-%m-%d %H:%M:%S").unwrap();
+        let expected = ndt.timestamp_micros();
+        assert_eq!(df.column("ts").unwrap().datetime().unwrap().get(0), Some(expected));
+    }
+
+    #[test]
+    fn set_cell_value_updates_time() {
+        let schema = vec![("t".to_string(), DataType::Time)];
+        let rows = vec![vec!["01:02:03".to_string()]];
+        let mut df = build_dataframe(&schema, &rows).unwrap();
+        set_cell_value(&mut df, 0, 0, "04:05:06").unwrap();
+        use chrono::{NaiveTime, Timelike};
+        let nt = NaiveTime::parse_from_str("04:05:06", "%H:%M:%S").unwrap();
+        let expected = (nt.num_seconds_from_midnight() as i64) * 1_000_000_000 + nt.nanosecond() as i64;
+        assert_eq!(df.column("t").unwrap().time().unwrap().get(0), Some(expected));
     }
 }
