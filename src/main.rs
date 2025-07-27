@@ -14,9 +14,9 @@ use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 #[cfg(feature = "plotting")]
 use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
+use parquet::basic::Compression;
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
-use parquet::basic::Compression;
 use rfd::FileDialog;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -415,27 +415,35 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.i64()?;
                 let val = value.parse::<i64>()?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series())
             })?;
         }
         DataType::Float64 => {
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.f64()?;
                 let val = value.parse::<f64>()?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series())
             })?;
         }
         DataType::Boolean => {
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.bool()?;
                 let val = matches!(value.to_lowercase().as_str(), "true" | "1");
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series())
             })?;
         }
         DataType::String => {
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.str()?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(value))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(value))?
+                    .into_series())
             })?;
         }
         DataType::Date => {
@@ -445,7 +453,9 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
                 let d = NaiveDate::parse_from_str(value, "%Y-%m-%d")?;
                 let days = (d - epoch).num_days() as i32;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(days))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(days))?
+                    .into_series())
             })?;
         }
         DataType::Datetime(_, _) => {
@@ -459,7 +469,9 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                             .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
                             .map(|dt| dt.timestamp_micros())
                     })?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(ts))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(ts))?
+                    .into_series())
             })?;
         }
         DataType::Time => {
@@ -467,8 +479,11 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 use chrono::{NaiveTime, Timelike};
                 let ca = c.time()?;
                 let t = NaiveTime::parse_from_str(value, "%H:%M:%S")?;
-                let ns = (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(ns))?.into_series())
+                let ns =
+                    (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(ns))?
+                    .into_series())
             })?;
         }
         _ => anyhow::bail!("unsupported type: {:?}", dtype),
@@ -1232,6 +1247,7 @@ impl eframe::App for ParquetApp {
             if let Some(col) = sort_after {
                 if let Ok(sorted) = df.sort([col.as_str()], SortMultipleOptions::default()) {
                     *df = sorted;
+                    self.refresh_dataframe_state(df);
                 }
             }
         }
@@ -1556,8 +1572,16 @@ impl eframe::App for ParquetApp {
                             Compression::LZ4_RAW => "Lz4Raw",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.compression, Compression::UNCOMPRESSED, "None");
-                            ui.selectable_value(&mut self.compression, Compression::SNAPPY, "Snappy");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::UNCOMPRESSED,
+                                "None",
+                            );
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::SNAPPY,
+                                "Snappy",
+                            );
                             ui.selectable_value(
                                 &mut self.compression,
                                 Compression::GZIP(Default::default()),
@@ -1575,7 +1599,11 @@ impl eframe::App for ParquetApp {
                                 Compression::ZSTD(Default::default()),
                                 "Zstd",
                             );
-                            ui.selectable_value(&mut self.compression, Compression::LZ4_RAW, "Lz4Raw");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::LZ4_RAW,
+                                "Lz4Raw",
+                            );
                         });
                 }
                 Operation::Partition => {
@@ -2162,6 +2190,55 @@ mod tests {
         app.search_text = "target".to_string();
         app.update_search_matches();
         assert_eq!(app.search_matches, vec![(2, 0)]);
+    }
+
+    #[test]
+    fn sort_refreshes_row_order() {
+        let schema = vec![("v".to_string(), DataType::Int64)];
+        let rows = vec![
+            vec!["3".to_string()],
+            vec!["1".to_string()],
+            vec!["2".to_string()],
+        ];
+        let mut df = build_dataframe(&schema, &rows).unwrap();
+        let mut app = ParquetApp::default();
+        app.display_rows = 3;
+        app.edit_df = Some(df.clone());
+        app.refresh_dataframe_state(&df);
+
+        app.search_text = "2".to_string();
+        app.update_search_matches();
+        assert_eq!(app.search_matches, vec![(2, 0)]);
+
+        if let Some(df) = &mut app.edit_df {
+            let sorted = df.sort(["v"], SortMultipleOptions::default()).unwrap();
+            *df = sorted;
+            app.refresh_dataframe_state(df);
+        }
+
+        assert_eq!(
+            app.rows,
+            vec![
+                vec!["1".to_string()],
+                vec!["2".to_string()],
+                vec!["3".to_string()],
+            ]
+        );
+        assert_eq!(app.search_matches, vec![(1, 0)]);
+
+        app.rows[0][0] = "4".to_string();
+        set_cell_value(app.edit_df.as_mut().unwrap(), 0, 0, &app.rows[0][0]).unwrap();
+        assert_eq!(
+            app.edit_df
+                .as_ref()
+                .unwrap()
+                .column("v")
+                .unwrap()
+                .i64()
+                .unwrap()
+                .get(0),
+            Some(4)
+        );
     }
 
     #[test]
