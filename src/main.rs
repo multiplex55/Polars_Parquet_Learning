@@ -53,6 +53,36 @@ impl Default for Operation {
     }
 }
 
+/// Help text for each [`Operation`] variant.
+const HELP_TEXT: &[(&str, &str)] = &[
+    ("Read", "Load an existing file into a DataFrame using the lazy API."),
+    (
+        "Modify",
+        "Convert rows to typed Records and append '!' to each name.",
+    ),
+    (
+        "Write",
+        "Write the current in-memory DataFrame back to the path in File.",
+    ),
+    ("Write CSV", "Write the current DataFrame to a CSV file."),
+    ("Write JSON", "Write the current DataFrame to a JSON file."),
+    (
+        "Create",
+        "Define a schema and rows in the UI then save to the Save path.",
+    ),
+    (
+        "Partition",
+        "Split the loaded DataFrame by columns and write each combination to nested folders under the Save path.",
+    ),
+    ("Query", "Filter the file by a name prefix."),
+    ("XML", "Convert an XML file to Parquet tables."),
+    ("XML Dynamic", "Dynamically parse XML and map fields."),
+    (
+        "Correlation",
+        "Compute correlation matrix for numeric columns.",
+    ),
+];
+
 #[derive(Debug, PartialEq)]
 enum PlotType {
     Histogram,
@@ -183,6 +213,8 @@ struct ParquetApp {
     search_matches: Vec<(usize, usize)>,
     /// Index of the active match
     search_index: usize,
+    /// Show the help window
+    show_help: bool,
 }
 
 impl Default for ParquetApp {
@@ -237,6 +269,7 @@ impl Default for ParquetApp {
             search_ignore_case: false,
             search_matches: Vec::new(),
             search_index: 0,
+            show_help: false,
         }
     }
 }
@@ -245,6 +278,11 @@ impl ParquetApp {
     /// Create a new [`ParquetApp`] instance.
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self::default()
+    }
+
+    /// Toggle visibility of the help window.
+    fn toggle_help(&mut self) {
+        self.show_help = !self.show_help;
     }
 }
 
@@ -727,6 +765,22 @@ impl ParquetApp {
 impl eframe::App for ParquetApp {
     /// Called each frame to update the UI.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::TopBottomPanel::top("top_menu").show(ctx, |ui| {
+            if ui.button("Help").clicked() {
+                self.toggle_help();
+            }
+        });
+
+        if self.show_help {
+            egui::Window::new("Help")
+                .open(&mut self.show_help)
+                .show(ctx, |ui| {
+                    for (name, desc) in HELP_TEXT {
+                        ui.label(format!("{}: {}", name, desc));
+                    }
+                });
+        }
+
         // Handle files dropped onto the window
         let dropped: Vec<egui::DroppedFile> = ctx.input(|i| i.raw.dropped_files.clone());
         if let Some(file) = dropped.first() {
@@ -2307,5 +2361,15 @@ mod tests {
         let min = *filtered.first().unwrap();
         let max = *filtered.last().unwrap();
         let _spread = egui_plot::BoxSpread::new(min, q1, q2, q3, max);
+    }
+
+    #[test]
+    fn help_button_toggles_flag() {
+        let mut app = ParquetApp::default();
+        assert!(!app.show_help);
+        app.toggle_help();
+        assert!(app.show_help);
+        app.toggle_help();
+        assert!(!app.show_help);
     }
 }
