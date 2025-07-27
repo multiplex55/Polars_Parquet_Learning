@@ -1,6 +1,6 @@
 use Polars_Parquet_Learning::{background, parquet_examples};
-use polars::prelude::*;
 use parquet::basic::Compression;
+use polars::prelude::*;
 use tempfile::tempdir;
 
 #[test]
@@ -286,5 +286,53 @@ fn prefetch_reuses_cache() -> anyhow::Result<()> {
         panic!("page not cached");
     }
     assert_eq!(cache.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn paginate_numeric_filters() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let file = dir.path().join("data.parquet");
+
+    let ids: Vec<i64> = (0..50).collect();
+    let mut df = df!("id" => ids.clone())?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        parquet::basic::Compression::SNAPPY,
+    )?;
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    let run_filter = |expr: &str| -> anyhow::Result<DataFrame> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        rt.block_on(background::read_filter_slice(
+            file.to_str().unwrap().to_string(),
+            vec![expr.to_string()],
+            0,
+            100,
+            tx,
+        ));
+        loop {
+            if let Ok(msg) = rx.recv() {
+                if let Ok(background::JobUpdate::Done(background::JobResult::DataFrame(df))) = msg {
+                    break Ok(df);
+                }
+            }
+        }
+    };
+
+    let df_gt = run_filter("id > 40")?;
+    assert_eq!(df_gt.height(), 9);
+
+    let df_lt = run_filter("id < 10")?;
+    assert_eq!(df_lt.height(), 10);
+
+    let df_ge = run_filter("id >= 48")?;
+    assert_eq!(df_ge.height(), 2);
+
+    let df_le = run_filter("id <= 0")?;
+    assert_eq!(df_le.height(), 1);
+
     Ok(())
 }

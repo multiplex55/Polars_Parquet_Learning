@@ -75,6 +75,10 @@ enum FilterOp {
     #[default]
     Equals,
     Contains,
+    Greater,
+    Less,
+    GreaterEq,
+    LessEq,
 }
 
 #[derive(Default, Clone)]
@@ -576,6 +580,10 @@ impl ParquetApp {
                     let op = match f.op {
                         FilterOp::Equals => "==",
                         FilterOp::Contains => "contains",
+                        FilterOp::Greater => ">",
+                        FilterOp::Less => "<",
+                        FilterOp::GreaterEq => ">=",
+                        FilterOp::LessEq => "<=",
                     };
                     Some(format!("{} {} {}", name, op, quote_expr_value(&f.value)))
                 }
@@ -614,6 +622,10 @@ impl ParquetApp {
                     let op = match f.op {
                         FilterOp::Equals => "==",
                         FilterOp::Contains => "contains",
+                        FilterOp::Greater => ">",
+                        FilterOp::Less => "<",
+                        FilterOp::GreaterEq => ">=",
+                        FilterOp::LessEq => "<=",
                     };
                     Some(format!("{} {} {}", name, op, quote_expr_value(&f.value)))
                 }
@@ -1115,11 +1127,7 @@ impl eframe::App for ParquetApp {
                         if let Ok(series) = df.column(col) {
                             let values: Vec<f64> = series
                                 .f64()
-                                .map(|ca| {
-                                    ca.into_iter()
-                                        .map(|o| o.unwrap_or(f64::NAN))
-                                        .collect()
-                                })
+                                .map(|ca| ca.into_iter().map(|o| o.unwrap_or(f64::NAN)).collect())
                                 .or_else(|_| {
                                     series.i64().map(|ca| {
                                         ca.into_iter()
@@ -1194,7 +1202,10 @@ impl eframe::App for ParquetApp {
                                                     .or_else(|_| {
                                                         ys.i64().map(|ca| {
                                                             ca.into_iter()
-                                                                .map(|o| o.map(|v| v as f64).unwrap_or(f64::NAN))
+                                                                .map(|o| {
+                                                                    o.map(|v| v as f64)
+                                                                        .unwrap_or(f64::NAN)
+                                                                })
                                                                 .collect()
                                                         })
                                                     })
@@ -1366,6 +1377,10 @@ impl eframe::App for ParquetApp {
                                                 let op = match f.op {
                                                     FilterOp::Equals => "==",
                                                     FilterOp::Contains => "contains",
+                                                    FilterOp::Greater => ">",
+                                                    FilterOp::Less => "<",
+                                                    FilterOp::GreaterEq => ">=",
+                                                    FilterOp::LessEq => "<=",
                                                 };
                                                 Some(format!("{} {} \"{}\"", name, op, f.value))
                                             }
@@ -1660,6 +1675,10 @@ impl eframe::App for ParquetApp {
                                 .selected_text(match filter.op {
                                     FilterOp::Equals => "=",
                                     FilterOp::Contains => "contains",
+                                    FilterOp::Greater => ">",
+                                    FilterOp::Less => "<",
+                                    FilterOp::GreaterEq => ">=",
+                                    FilterOp::LessEq => "<=",
                                 })
                                 .show_ui(ui, |ui| {
                                     changed |= ui
@@ -1671,6 +1690,18 @@ impl eframe::App for ParquetApp {
                                             FilterOp::Contains,
                                             "contains",
                                         )
+                                        .changed();
+                                    changed |= ui
+                                        .selectable_value(&mut filter.op, FilterOp::Greater, ">")
+                                        .changed();
+                                    changed |= ui
+                                        .selectable_value(&mut filter.op, FilterOp::Less, "<")
+                                        .changed();
+                                    changed |= ui
+                                        .selectable_value(&mut filter.op, FilterOp::GreaterEq, ">=")
+                                        .changed();
+                                    changed |= ui
+                                        .selectable_value(&mut filter.op, FilterOp::LessEq, "<=")
                                         .changed();
                                 });
                             changed |= ui.text_edit_singleline(&mut filter.value).changed();
