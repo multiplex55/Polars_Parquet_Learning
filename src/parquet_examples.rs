@@ -105,8 +105,8 @@ pub fn write_dataframe_to_parquet(
     path: &str,
     compression: parquet::basic::Compression,
 ) -> Result<()> {
-    use polars::prelude::{ParquetCompression as Pc, GzipLevel, BrotliLevel, ZstdLevel};
     use parquet::basic::Compression as C;
+    use polars::prelude::{BrotliLevel, GzipLevel, ParquetCompression as Pc, ZstdLevel};
 
     let pc = match compression {
         C::UNCOMPRESSED => Pc::Uncompressed,
@@ -119,9 +119,7 @@ pub fn write_dataframe_to_parquet(
     };
 
     let file = File::create(path)?;
-    ParquetWriter::new(file)
-        .with_compression(pc)
-        .finish(df)?;
+    ParquetWriter::new(file).with_compression(pc).finish(df)?;
     Ok(())
 }
 
@@ -472,11 +470,7 @@ pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<
         }
         let file = unique_path.to_string_lossy().to_string();
         let mut part = part;
-        write_dataframe_to_parquet(
-            &mut part,
-            &file,
-            parquet::basic::Compression::SNAPPY,
-        )?;
+        write_dataframe_to_parquet(&mut part, &file, parquet::basic::Compression::SNAPPY)?;
         written.insert(unique_path);
     }
     Ok(())
@@ -575,6 +569,15 @@ pub fn filter_by_name_prefix(path: &str, prefix: &str) -> Result<DataFrame> {
     Ok(lf
         .filter(col("name").str().starts_with(lit(prefix)))
         .collect()?)
+}
+
+/// Quote a string value for use in an expression.
+///
+/// Escapes any embedded backslashes and double quotes and wraps the result
+/// in double quotes so it can be parsed by [`shlex`].
+pub fn quote_expr_value(value: &str) -> String {
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
 }
 
 /// Apply a simple expression string as a filter on a Parquet file.
@@ -1039,6 +1042,24 @@ mod tests {
         )?;
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "name == \"John Doe\"")?;
+        assert_eq!(filtered.height(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn filter_with_expr_escaped_quotes() -> Result<()> {
+        let dir = tempdir()?;
+        let file = dir.path().join("data.parquet");
+
+        let mut df = df!("name" => ["Ann \"The Hammer\"", "Bob"])?;
+        write_dataframe_to_parquet(
+            &mut df,
+            file.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
+
+        let expr = format!("name == {}", quote_expr_value("Ann \"The Hammer\""));
+        let filtered = filter_with_exprs(file.to_str().unwrap(), &[expr])?;
         assert_eq!(filtered.height(), 1);
         Ok(())
     }

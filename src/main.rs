@@ -5,6 +5,7 @@ pub mod background;
 pub mod cli;
 pub mod parquet_examples;
 
+use crate::parquet_examples::quote_expr_value;
 use crate::search;
 use crate::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
@@ -576,7 +577,7 @@ impl ParquetApp {
                         FilterOp::Equals => "==",
                         FilterOp::Contains => "contains",
                     };
-                    Some(format!("{} {} \"{}\"", name, op, f.value))
+                    Some(format!("{} {} {}", name, op, quote_expr_value(&f.value)))
                 }
             })
             .collect();
@@ -614,7 +615,7 @@ impl ParquetApp {
                         FilterOp::Equals => "==",
                         FilterOp::Contains => "contains",
                     };
-                    Some(format!("{} {} \"{}\"", name, op, f.value))
+                    Some(format!("{} {} {}", name, op, quote_expr_value(&f.value)))
                 }
             })
             .collect();
