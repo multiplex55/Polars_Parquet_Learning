@@ -5,15 +5,14 @@ pub mod background;
 pub mod cli;
 pub mod parquet_examples;
 
-use crate::parquet_examples::quote_expr_value;
-use crate::search;
-use crate::{xml_dynamic, xml_to_parquet};
+use polars_parquet_learning::parquet_examples::quote_expr_value;
+use polars_parquet_learning::search;
+use polars_parquet_learning::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
 use background::{JobResult, JobUpdate};
 use clap::Parser;
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
-#[cfg(feature = "plotting")]
 use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use parquet::basic::Compression;
 use polars::prelude::SortMultipleOptions;
@@ -54,7 +53,6 @@ impl Default for Operation {
     }
 }
 
-#[cfg(feature = "plotting")]
 #[derive(Debug, PartialEq)]
 enum PlotType {
     Histogram,
@@ -63,7 +61,6 @@ enum PlotType {
     BoxPlot,
 }
 
-#[cfg(feature = "plotting")]
 impl Default for PlotType {
     fn default() -> Self {
         PlotType::Histogram
@@ -140,22 +137,16 @@ struct ParquetApp {
     cache_order: std::collections::VecDeque<usize>,
     /// Start index of a page currently being prefetched
     prefetch_start: Option<usize>,
-    #[cfg(feature = "plotting")]
     /// Selected column to plot
     plot_column: Option<String>,
-    #[cfg(feature = "plotting")]
     /// Second column for scatter plots
     plot_y_column: Option<String>,
-    #[cfg(feature = "plotting")]
     /// Type of plot to display
     plot_type: PlotType,
-    #[cfg(feature = "plotting")]
     /// Number of bins for histogram plots
     hist_bins: usize,
-    #[cfg(feature = "plotting")]
     /// Optional x-axis range for plots
     x_range: Option<(f64, f64)>,
-    #[cfg(feature = "plotting")]
     /// Optional y-axis range for plots
     y_range: Option<(f64, f64)>,
     /// Tokio runtime for background tasks
@@ -223,17 +214,11 @@ impl Default for ParquetApp {
             page_cache: std::collections::HashMap::new(),
             cache_order: std::collections::VecDeque::new(),
             prefetch_start: None,
-            #[cfg(feature = "plotting")]
             plot_column: None,
-            #[cfg(feature = "plotting")]
             plot_y_column: None,
-            #[cfg(feature = "plotting")]
             plot_type: PlotType::default(),
-            #[cfg(feature = "plotting")]
             hist_bins: 10,
-            #[cfg(feature = "plotting")]
             x_range: None,
-            #[cfg(feature = "plotting")]
             y_range: None,
             runtime: tokio::runtime::Runtime::new().expect("runtime"),
             result_rx: None,
@@ -1040,7 +1025,6 @@ impl eframe::App for ParquetApp {
                     self.refresh_dataframe_state(df);
                 }
 
-                #[cfg(feature = "plotting")]
                 {
                     use polars::prelude::DataType;
                     ui.separator();
