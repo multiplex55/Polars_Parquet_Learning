@@ -621,6 +621,22 @@ pub fn pivot_wider(df: &DataFrame, index: &str, columns: &str, values: &str) -> 
     )?)
 }
 
+/// Compute a rolling mean over `column` for a Parquet file.
+///
+/// Returns a [`DataFrame`] with a single `"rolling_mean"` column containing the
+/// calculated values. The lazy API is used to scan the file and apply
+/// [`Expr::rolling_mean`] with a fixed window size.
+pub fn rolling_mean(path: &str, column: &str, window: usize) -> Result<DataFrame> {
+    let opts = RollingOptionsFixedWindow {
+        window_size: window,
+        ..Default::default()
+    };
+    let lf = LazyFrame::scan_parquet(path, ScanArgsParquet::default())?;
+    Ok(lf
+        .select([col(column).rolling_mean(opts).alias("rolling_mean")])
+        .collect()?)
+}
+
 fn parse_simple_expr(s: &str) -> Result<Expr> {
     let parts: Vec<String> = shlex::Shlex::new(s).collect();
     if parts.len() != 3 {
