@@ -638,9 +638,8 @@ impl ParquetApp {
         if self.search_text.is_empty() {
             return;
         }
-        let row_limit = self.display_rows.min(self.rows.len());
-        for r in 0..row_limit {
-            for (c, cell) in self.rows[r].iter().enumerate() {
+        for (r, row) in self.rows.iter().enumerate() {
+            for (c, cell) in row.iter().enumerate() {
                 if cell.contains(&self.search_text) {
                     self.search_matches.push((r, c));
                 }
@@ -2008,5 +2007,19 @@ mod tests {
         let nt = NaiveTime::parse_from_str("04:05:06", "%H:%M:%S").unwrap();
         let expected = (nt.num_seconds_from_midnight() as i64) * 1_000_000_000 + nt.nanosecond() as i64;
         assert_eq!(df.column("t").unwrap().time().unwrap().get(0), Some(expected));
+    }
+
+    #[test]
+    fn search_matches_across_all_rows() {
+        let mut app = ParquetApp::default();
+        app.display_rows = 2;
+        app.rows = vec![
+            vec!["a".to_string()],
+            vec!["b".to_string()],
+            vec!["target".to_string()],
+        ];
+        app.search_text = "target".to_string();
+        app.update_search_matches();
+        assert_eq!(app.search_matches, vec![(2, 0)]);
     }
 }
