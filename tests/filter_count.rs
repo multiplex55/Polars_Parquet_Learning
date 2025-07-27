@@ -47,3 +47,40 @@ fn count_filtered_rows() -> anyhow::Result<()> {
     assert_eq!(res, 500);
     Ok(())
 }
+
+#[test]
+fn count_filtered_rows_with_quotes() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let file = dir.path().join("data.parquet");
+
+    let mut df = df!("name" => ["Ann \"The Hammer\"", "Bob"])?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        Compression::SNAPPY,
+    )?;
+
+    let expr = format!(
+        "name == {}",
+        parquet_examples::quote_expr_value("Ann \"The Hammer\"")
+    );
+    let count = parquet_examples::filter_count(file.to_str().unwrap(), &[expr.clone()])?;
+    assert_eq!(count, 1);
+
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (tx, rx) = mpsc::channel();
+    rt.block_on(background::filter_count(
+        file.to_str().unwrap().to_string(),
+        vec![expr],
+        tx,
+    ));
+    let res = loop {
+        if let Ok(msg) = rx.recv() {
+            if let Ok(background::JobUpdate::Done(background::JobResult::Count(c))) = msg {
+                break c;
+            }
+        }
+    };
+    assert_eq!(res, 1);
+    Ok(())
+}
