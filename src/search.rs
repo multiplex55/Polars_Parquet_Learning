@@ -1,14 +1,20 @@
 /// Search utilities for table data.
 
 /// Return all cell coordinates containing `query`.
-pub fn find_matches(rows: &[Vec<String>], query: &str) -> Vec<(usize, usize)> {
+pub fn find_matches(rows: &[Vec<String>], query: &str, ignore_case: bool) -> Vec<(usize, usize)> {
     if query.is_empty() {
         return Vec::new();
     }
+    let query_cmp = if ignore_case {
+        query.to_lowercase()
+    } else {
+        query.to_string()
+    };
     let mut out = Vec::new();
     for (r, row) in rows.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
-            if cell.contains(query) {
+            let hay = if ignore_case { cell.to_lowercase() } else { cell.clone() };
+            if hay.contains(&query_cmp) {
                 out.push((r, c));
             }
         }
