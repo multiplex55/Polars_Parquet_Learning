@@ -520,12 +520,12 @@ pub fn compute_histogram(
     values: &[f64],
     bins: usize,
     range: Option<(f64, f64)>,
-) -> (Vec<f64>, f64, f64) {
+) -> Result<(Vec<f64>, f64, f64)> {
     if bins == 0 {
-        return (Vec::new(), 0.0, 0.0);
+        return Ok((Vec::new(), 0.0, 0.0));
     }
     if values.is_empty() {
-        return (vec![0.0; bins], 0.0, 0.0);
+        return Ok((vec![0.0; bins], 0.0, 0.0));
     }
 
     let (mut min, mut max) = match range {
@@ -537,7 +537,7 @@ pub fn compute_histogram(
         }
     };
     if min > max {
-        std::mem::swap(&mut min, &mut max);
+        anyhow::bail!("histogram range min is greater than max");
     }
     let step = (max - min) / bins as f64;
     let mut counts = vec![0f64; bins];
@@ -556,7 +556,7 @@ pub fn compute_histogram(
             counts[i] += 1.0;
         }
     }
-    (counts, min, step)
+    Ok((counts, min, step))
 }
 
 /// Filter rows in a Parquet file by a prefix on the `name` column.
