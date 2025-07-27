@@ -17,3 +17,11 @@ fn histogram_constant_values() {
     assert_eq!(counts[0] as usize, values.len());
     assert!(counts[1..].iter().all(|&c| c == 0.0));
 }
+
+#[test]
+fn histogram_swaps_invalid_range() {
+    let values = vec![0.0, 1.0, 2.0, 3.0, 4.0];
+    let expected = compute_histogram(&values, 5, Some((0.0, 5.0)));
+    let reversed = compute_histogram(&values, 5, Some((5.0, 0.0)));
+    assert_eq!(expected, reversed);
+}

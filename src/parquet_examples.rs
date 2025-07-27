@@ -529,7 +529,7 @@ pub fn compute_histogram(
         return (vec![0.0; bins], 0.0, 0.0);
     }
 
-    let (min, max) = match range {
+    let (mut min, mut max) = match range {
         Some(r) => r,
         None => {
             let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -537,6 +537,9 @@ pub fn compute_histogram(
             (min, max)
         }
     };
+    if min > max {
+        std::mem::swap(&mut min, &mut max);
+    }
     let step = (max - min) / bins as f64;
     let mut counts = vec![0f64; bins];
     if step == 0.0 {
