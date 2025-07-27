@@ -5,6 +5,7 @@ pub mod background;
 pub mod cli;
 pub mod parquet_examples;
 
+use crate::parquet_examples::quote_expr_value;
 use crate::search;
 use crate::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
@@ -14,9 +15,9 @@ use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
 #[cfg(feature = "plotting")]
 use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
+use parquet::basic::Compression;
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
-use parquet::basic::Compression;
 use rfd::FileDialog;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -415,27 +416,35 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.i64()?;
                 let val = value.parse::<i64>()?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series())
             })?;
         }
         DataType::Float64 => {
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.f64()?;
                 let val = value.parse::<f64>()?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series())
             })?;
         }
         DataType::Boolean => {
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.bool()?;
                 let val = matches!(value.to_lowercase().as_str(), "true" | "1");
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(val))?
+                    .into_series())
             })?;
         }
         DataType::String => {
             df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.str()?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(value))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(value))?
+                    .into_series())
             })?;
         }
         DataType::Date => {
@@ -445,7 +454,9 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
                 let d = NaiveDate::parse_from_str(value, "%Y-%m-%d")?;
                 let days = (d - epoch).num_days() as i32;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(days))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(days))?
+                    .into_series())
             })?;
         }
         DataType::Datetime(_, _) => {
@@ -459,7 +470,9 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                             .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
                             .map(|dt| dt.timestamp_micros())
                     })?;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(ts))?.into_series())
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(ts))?
+                    .into_series())
             })?;
         }
         DataType::Time => {
@@ -467,8 +480,11 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 use chrono::{NaiveTime, Timelike};
                 let ca = c.time()?;
                 let t = NaiveTime::parse_from_str(value, "%H:%M:%S")?;
-                let ns = (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
-                Ok(ca.scatter_single(vec![row as IdxSize], Some(ns))?.into_series())
+                let ns =
+                    (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
+                Ok(ca
+                    .scatter_single(vec![row as IdxSize], Some(ns))?
+                    .into_series())
             })?;
         }
         _ => anyhow::bail!("unsupported type: {:?}", dtype),
@@ -561,7 +577,7 @@ impl ParquetApp {
                         FilterOp::Equals => "==",
                         FilterOp::Contains => "contains",
                     };
-                    Some(format!("{} {} \"{}\"", name, op, f.value))
+                    Some(format!("{} {} {}", name, op, quote_expr_value(&f.value)))
                 }
             })
             .collect();
@@ -599,7 +615,7 @@ impl ParquetApp {
                         FilterOp::Equals => "==",
                         FilterOp::Contains => "contains",
                     };
-                    Some(format!("{} {} \"{}\"", name, op, f.value))
+                    Some(format!("{} {} {}", name, op, quote_expr_value(&f.value)))
                 }
             })
             .collect();
@@ -1556,8 +1572,16 @@ impl eframe::App for ParquetApp {
                             Compression::LZ4_RAW => "Lz4Raw",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.compression, Compression::UNCOMPRESSED, "None");
-                            ui.selectable_value(&mut self.compression, Compression::SNAPPY, "Snappy");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::UNCOMPRESSED,
+                                "None",
+                            );
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::SNAPPY,
+                                "Snappy",
+                            );
                             ui.selectable_value(
                                 &mut self.compression,
                                 Compression::GZIP(Default::default()),
@@ -1575,7 +1599,11 @@ impl eframe::App for ParquetApp {
                                 Compression::ZSTD(Default::default()),
                                 "Zstd",
                             );
-                            ui.selectable_value(&mut self.compression, Compression::LZ4_RAW, "Lz4Raw");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::LZ4_RAW,
+                                "Lz4Raw",
+                            );
                         });
                 }
                 Operation::Partition => {
