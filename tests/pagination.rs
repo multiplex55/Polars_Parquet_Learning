@@ -1,5 +1,6 @@
 use Polars_Parquet_Learning::{background, parquet_examples};
 use polars::prelude::*;
+use parquet::basic::Compression;
 use tempfile::tempdir;
 
 #[test]
@@ -10,7 +11,11 @@ fn paginate_multiple_pages() -> anyhow::Result<()> {
     let ids: Vec<i64> = (0..120).collect();
     let names: Vec<String> = ids.iter().map(|i| format!("n{i}")).collect();
     let mut df = df!("id" => ids, "name" => names)?;
-    parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        parquet::basic::Compression::SNAPPY,
+    )?;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let (tx1, rx1) = std::sync::mpsc::channel();
@@ -71,7 +76,11 @@ fn paginate_filtered_pages() -> anyhow::Result<()> {
         })
         .collect();
     let mut df = df!("id" => ids, "name" => names)?;
-    parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        parquet::basic::Compression::SNAPPY,
+    )?;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let exprs = vec!["name == \"yes\"".to_string()];
@@ -127,7 +136,11 @@ fn paginate_filtered_contains() -> anyhow::Result<()> {
     let ids: Vec<i64> = (0..120).collect();
     let names: Vec<String> = ids.iter().map(|i| format!("n{i}")).collect();
     let mut df = df!("id" => ids, "name" => names)?;
-    parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        parquet::basic::Compression::SNAPPY,
+    )?;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let exprs = vec!["name contains \"1\"".to_string()];
@@ -185,7 +198,11 @@ fn prefetch_reuses_cache() -> anyhow::Result<()> {
     let ids: Vec<i64> = (0..50).collect();
     let names: Vec<String> = ids.iter().map(|i| format!("n{i}")).collect();
     let mut df = df!("id" => ids, "name" => names)?;
-    parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        parquet::basic::Compression::SNAPPY,
+    )?;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let mut cache: HashMap<usize, DataFrame> = HashMap::new();

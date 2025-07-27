@@ -95,14 +95,33 @@ pub fn records_to_dataframe(records: &[Record]) -> Result<DataFrame> {
     Ok(df)
 }
 
-/// Write a [`DataFrame`] to a Parquet file.
+/// Write a [`DataFrame`] to a Parquet file using the chosen compression.
 ///
 /// The writer takes a reference to a file handle.  Because the data is already
 /// materialised in memory this uses the eager API.  In a real application the
 /// lazy API could be used to stream results directly to disk.
-pub fn write_dataframe_to_parquet(df: &mut DataFrame, path: &str) -> Result<()> {
+pub fn write_dataframe_to_parquet(
+    df: &mut DataFrame,
+    path: &str,
+    compression: parquet::basic::Compression,
+) -> Result<()> {
+    use polars::prelude::{ParquetCompression as Pc, GzipLevel, BrotliLevel, ZstdLevel};
+    use parquet::basic::Compression as C;
+
+    let pc = match compression {
+        C::UNCOMPRESSED => Pc::Uncompressed,
+        C::SNAPPY => Pc::Snappy,
+        C::GZIP(level) => Pc::Gzip(Some(GzipLevel::try_new(level.compression_level() as u8)?)),
+        C::LZO => Pc::Lzo,
+        C::BROTLI(level) => Pc::Brotli(Some(BrotliLevel::try_new(level.compression_level())?)),
+        C::LZ4 | C::LZ4_RAW => Pc::Lz4Raw,
+        C::ZSTD(level) => Pc::Zstd(Some(ZstdLevel::try_new(level.compression_level() as i32)?)),
+    };
+
     let file = File::create(path)?;
-    ParquetWriter::new(file).finish(df)?;
+    ParquetWriter::new(file)
+        .with_compression(pc)
+        .finish(df)?;
     Ok(())
 }
 
@@ -224,7 +243,7 @@ pub fn dataframe_to_items(df: &DataFrame) -> Result<Vec<Vec<ExampleItem>>> {
 pub fn write_dremel_parquet(rows: &[Vec<ExampleItem>], path: &str) -> Result<()> {
     let df = create_dremel_dataframe(rows)?;
     let mut df = df.clone();
-    write_dataframe_to_parquet(&mut df, path)
+    write_dataframe_to_parquet(&mut df, path, parquet::basic::Compression::SNAPPY)
 }
 
 /// Read a Dremel encoded Parquet file into typed structs.
@@ -287,7 +306,7 @@ pub fn summarize_dataframe(df: &DataFrame) -> Result<DataFrameSummary> {
 /// GUI can create a `DataFrame` and immediately persist it using a single call.
 pub fn create_and_write_parquet(df: &DataFrame, path: &str) -> Result<()> {
     let mut df = df.clone();
-    write_dataframe_to_parquet(&mut df, path)
+    write_dataframe_to_parquet(&mut df, path, parquet::basic::Compression::SNAPPY)
 }
 
 /// Build a new [`DataFrame`] from a user provided schema and row data.
@@ -448,7 +467,11 @@ pub fn write_partitioned(df: &DataFrame, columns: &[&str], dir: &str) -> Result<
         }
         let file = unique_path.to_string_lossy().to_string();
         let mut part = part;
-        write_dataframe_to_parquet(&mut part, &file)?;
+        write_dataframe_to_parquet(
+            &mut part,
+            &file,
+            parquet::basic::Compression::SNAPPY,
+        )?;
         written.insert(unique_path);
     }
     Ok(())
@@ -686,7 +709,11 @@ mod tests {
 
         // Create a small DataFrame and write it as Parquet
         let mut df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
-        write_dataframe_to_parquet(&mut df, input_path.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df,
+            input_path.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         // Read it back
         let df_read = read_parquet_to_dataframe(input_path.to_str().unwrap())?;
@@ -696,7 +723,11 @@ mod tests {
         // Modify then write again
         modify_records(&mut records);
         let mut out_df = records_to_dataframe(&records)?;
-        write_dataframe_to_parquet(&mut out_df, output_path.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut out_df,
+            output_path.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         // Ensure written file has expected modifications
         let final_df = read_parquet_to_dataframe(output_path.to_str().unwrap())?;
@@ -711,7 +742,11 @@ mod tests {
         let file = dir.path().join("data.parquet");
 
         let mut df = df!("id" => &[1i64, 2, 3], "name" => &["alice", "bob", "anne"])?;
-        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df,
+            file.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         // Reading only the "id" column
         let cols = read_selected_columns(file.to_str().unwrap(), &["id"])?;
@@ -950,8 +985,16 @@ mod tests {
         let mut df1 = df!("id" => &[1i64], "name" => &["a"])?;
         let mut df2 = df!("id" => &[2i64], "name" => &["b"])?;
 
-        write_dataframe_to_parquet(&mut df1, f1.to_str().unwrap())?;
-        write_dataframe_to_parquet(&mut df2, f2.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df1,
+            f1.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
+        write_dataframe_to_parquet(
+            &mut df2,
+            f2.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         let read = read_parquet_directory(dir.path().to_str().unwrap())?;
         assert_eq!(read.height(), df1.height() + df2.height());
@@ -964,7 +1007,11 @@ mod tests {
         let file = dir.path().join("data.parquet");
 
         let mut df = df!("id" => &[1i64, 2, 3], "val" => &[10i64, 20, 30])?;
-        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df,
+            file.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "id > 1")?;
         assert_eq!(filtered.height(), 2);
@@ -977,7 +1024,11 @@ mod tests {
         let file = dir.path().join("data.parquet");
 
         let mut df = df!("name" => &["John Doe", "Jane"])?;
-        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df,
+            file.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         let filtered = filter_with_expr(file.to_str().unwrap(), "name == \"John Doe\"")?;
         assert_eq!(filtered.height(), 1);
@@ -1039,7 +1090,11 @@ mod tests {
         let file = dir.path().join("data.parquet");
 
         let mut df = df!("id" => &[1i64, 2, 3, 4], "name" => &["a", "b", "c", "d"])?;
-        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df,
+            file.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         let slice = read_parquet_slice(file.to_str().unwrap(), 1, 2)?;
         assert_eq!(slice.height(), 2);
@@ -1054,7 +1109,11 @@ mod tests {
         let file = dir.path().join("data.parquet");
 
         let mut df = df!("id" => &[1i64, 2, 3])?;
-        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+        write_dataframe_to_parquet(
+            &mut df,
+            file.to_str().unwrap(),
+            parquet::basic::Compression::SNAPPY,
+        )?;
 
         let exprs = vec!["id contains \"1\"".to_string()];
         let res = filter_with_exprs(file.to_str().unwrap(), &exprs);

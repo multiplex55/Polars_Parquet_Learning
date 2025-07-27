@@ -1,7 +1,7 @@
 use crate::parquet_examples;
 use anyhow::Result;
 use crate::xml_to_parquet;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Top level command line arguments
 #[derive(Parser)]
@@ -41,12 +41,42 @@ pub struct ModifyArgs {
     pub file: String,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum CompressionArg {
+    None,
+    Snappy,
+    Gzip,
+    Lzo,
+    Brotli,
+    Lz4,
+    Zstd,
+    Lz4Raw,
+}
+
+impl From<CompressionArg> for parquet::basic::Compression {
+    fn from(value: CompressionArg) -> Self {
+        match value {
+            CompressionArg::None => Self::UNCOMPRESSED,
+            CompressionArg::Snappy => Self::SNAPPY,
+            CompressionArg::Gzip => Self::GZIP(Default::default()),
+            CompressionArg::Lzo => Self::LZO,
+            CompressionArg::Brotli => Self::BROTLI(Default::default()),
+            CompressionArg::Lz4 => Self::LZ4,
+            CompressionArg::Zstd => Self::ZSTD(Default::default()),
+            CompressionArg::Lz4Raw => Self::LZ4_RAW,
+        }
+    }
+}
+
 #[derive(Args)]
 pub struct WriteArgs {
     /// Input file
     pub input: String,
     /// Output file
     pub output: String,
+    /// Compression algorithm to use
+    #[arg(long, value_enum, default_value_t = CompressionArg::Snappy)]
+    pub compression: CompressionArg,
 }
 
 #[derive(Args)]
@@ -92,7 +122,7 @@ pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Read(args) => cmd_read(&args.file),
         Commands::Modify(args) => cmd_modify(&args.file),
-        Commands::Write(args) => cmd_write(&args.input, &args.output),
+        Commands::Write(args) => cmd_write(&args.input, &args.output, args.compression),
         Commands::Create(args) => cmd_create(&args.output),
         Commands::Partition(args) => cmd_partition(&args.input, &args.column, &args.dir),
         Commands::Xml(args) => cmd_xml(&args),
@@ -117,9 +147,9 @@ fn cmd_modify(file: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_write(input: &str, output: &str) -> Result<()> {
+fn cmd_write(input: &str, output: &str, compression: CompressionArg) -> Result<()> {
     let mut df = parquet_examples::read_parquet_to_dataframe(input)?;
-    parquet_examples::write_dataframe_to_parquet(&mut df, output)?;
+    parquet_examples::write_dataframe_to_parquet(&mut df, output, compression.into())?;
     println!("Wrote {output}");
     Ok(())
 }
