@@ -1166,8 +1166,18 @@ impl eframe::App for ParquetApp {
                                     PlotType::BoxPlot => {
                                         use egui_plot::{BoxElem, BoxPlot};
                                         if !values.is_empty() {
-                                            let mut sorted = values.clone();
-                                            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                                            let mut sorted: Vec<f64> = values
+                                                .iter()
+                                                .cloned()
+                                                .filter(|v| !v.is_nan())
+                                                .collect();
+                                            if sorted.is_empty() {
+                                                continue;
+                                            }
+                                            sorted.sort_by(|a, b| {
+                                                a.partial_cmp(b)
+                                                    .unwrap_or(std::cmp::Ordering::Equal)
+                                            });
                                             let q1 = sorted[(sorted.len() as f64 * 0.25) as usize];
                                             let q2 = sorted[(sorted.len() as f64 * 0.5) as usize];
                                             let q3 = sorted[(sorted.len() as f64 * 0.75) as usize];
@@ -2021,5 +2031,24 @@ mod tests {
         app.search_text = "target".to_string();
         app.update_search_matches();
         assert_eq!(app.search_matches, vec![(2, 0)]);
+    }
+
+    #[test]
+    fn boxplot_handles_nan() {
+        let values = vec![1.0, f64::NAN, 2.0, 3.0];
+        let mut filtered: Vec<f64> = values
+            .iter()
+            .cloned()
+            .filter(|v| !v.is_nan())
+            .collect();
+        filtered.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let len = filtered.len();
+        assert!(len > 0);
+        let q1 = filtered[(len as f64 * 0.25) as usize];
+        let q2 = filtered[(len as f64 * 0.5) as usize];
+        let q3 = filtered[(len as f64 * 0.75) as usize];
+        let min = *filtered.first().unwrap();
+        let max = *filtered.last().unwrap();
+        let _spread = egui_plot::BoxSpread::new(min, q1, q2, q3, max);
     }
 }
