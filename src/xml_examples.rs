@@ -25,18 +25,28 @@ pub fn write_tables_to_parquet(tables: &BTreeMap<&str, DataFrame>, output_dir: &
 /// Read previously written Parquet tables and rebuild the [`Root`] structure.
 pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
     let p = Path::new(dir);
-    let templates =
-        parquet_examples::read_parquet_to_dataframe(p.join("templates.parquet").to_str().unwrap())?;
-    let messages =
-        parquet_examples::read_parquet_to_dataframe(p.join("messages.parquet").to_str().unwrap())?;
+    let templates = parquet_examples::read_parquet_to_dataframe(
+        p.join("templates.parquet")
+            .to_str()
+            .ok_or_else(|| anyhow!("missing templates path"))?,
+    )?;
+    let messages = parquet_examples::read_parquet_to_dataframe(
+        p.join("messages.parquet")
+            .to_str()
+            .ok_or_else(|| anyhow!("missing messages path"))?,
+    )?;
     let repositories = parquet_examples::read_parquet_to_dataframe(
-        p.join("repositories.parquet").to_str().unwrap(),
+        p.join("repositories.parquet")
+            .to_str()
+            .ok_or_else(|| anyhow!("missing repositories path"))?,
     )?;
 
     let fields_path = p.join("fields.parquet");
     let fields = if fields_path.exists() {
         Some(parquet_examples::read_parquet_to_dataframe(
-            fields_path.to_str().unwrap(),
+            fields_path
+                .to_str()
+                .ok_or_else(|| anyhow!("missing fields path"))?,
         )?)
     } else {
         None
@@ -44,7 +54,9 @@ pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
     let parts_path = p.join("parts.parquet");
     let parts = if parts_path.exists() {
         Some(parquet_examples::read_parquet_to_dataframe(
-            parts_path.to_str().unwrap(),
+            parts_path
+                .to_str()
+                .ok_or_else(|| anyhow!("missing parts path"))?,
         )?)
     } else {
         None
