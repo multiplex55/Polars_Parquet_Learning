@@ -8,7 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Polars DataFrame library with Parquet support
-polars = { version = "0.49.1", features = ["lazy", "parquet", "strings", "partition_by", "json", "regex", "pivot"] }
+polars = { version = "0.49.1", features = ["lazy", "parquet", "strings", "partition_by", "json", "regex", "pivot", "dtype-time"] }
 
 # Low level Parquet crate (optional when using Polars)
 parquet = "55.2"
