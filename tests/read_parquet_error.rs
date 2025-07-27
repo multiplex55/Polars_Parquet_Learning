@@ -1,6 +1,6 @@
 use polars::prelude::*;
 use tempfile::tempdir;
-use Polars_Parquet_Learning::xml_examples;
+use polars_parquet_learning::xml_examples;
 
 #[test]
 fn read_parquet_with_nulls_returns_error() -> anyhow::Result<()> {

@@ -5,21 +5,21 @@ pub mod background;
 pub mod cli;
 pub mod parquet_examples;
 
-use Polars_Parquet_Learning::parquet_examples::quote_expr_value;
-use Polars_Parquet_Learning::search;
-use Polars_Parquet_Learning::{xml_dynamic, xml_to_parquet};
+use polars_parquet_learning::parquet_examples::quote_expr_value;
+use polars_parquet_learning::search;
+use polars_parquet_learning::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
 use background::{JobResult, JobUpdate};
 use clap::Parser;
 use eframe::egui;
 use egui_extras::{Column as TableColumn, TableBuilder};
-use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
+use egui_plot::{BarChart, Line, Plot, PlotPoints};
 use parquet::basic::Compression;
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
 use rfd::FileDialog;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap};
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -395,7 +395,7 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
                                     .or_else(|_| {
                                         NaiveDateTime::parse_from_str(val, "%Y-%m-%dT%H:%M:%S")
                                     })
-                                    .map(|dt| dt.timestamp_micros())
+                                    .map(|dt| dt.and_utc().timestamp_micros())
                             })
                             .map_err(|e| {
                                 anyhow::anyhow!("failed to parse '{val}' as datetime: {e}")
@@ -500,7 +500,7 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col_idx: usize, value: &str) -
                     .or_else(|_| {
                         NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
                             .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
-                            .map(|dt| dt.timestamp_micros())
+                            .map(|dt| dt.and_utc().timestamp_micros())
                     })
                     .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
                 Ok(ca
@@ -849,7 +849,7 @@ impl eframe::App for ParquetApp {
                 ui.horizontal(|ui| {
                     ui.label("Page size:");
                     if ui
-                        .add(egui::DragValue::new(&mut self.page_size).clamp_range(1..=1000))
+                        .add(egui::DragValue::new(&mut self.page_size).range(1..=1000))
                         .changed()
                     {
                         self.load_page();
@@ -858,7 +858,7 @@ impl eframe::App for ParquetApp {
                 ui.horizontal(|ui| {
                     ui.label("Rows to display:");
                     if ui
-                        .add(egui::DragValue::new(&mut self.display_rows).clamp_range(1..=1000))
+                        .add(egui::DragValue::new(&mut self.display_rows).range(1..=1000))
                         .changed()
                     {
                         self.update_search_matches();
@@ -944,7 +944,7 @@ impl eframe::App for ParquetApp {
                                             } else {
                                                 egui::Color32::from_rgb(255, 255, 0)
                                             };
-                                            egui::Frame::none().fill(color).show(ui, |ui| {
+                                            egui::Frame::NONE.fill(color).show(ui, |ui| {
                                                 edit(ui);
                                             });
                                         } else {
@@ -1146,7 +1146,7 @@ impl eframe::App for ParquetApp {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Bins:");
-                        ui.add(egui::DragValue::new(&mut self.hist_bins).clamp_range(1..=100));
+                        ui.add(egui::DragValue::new(&mut self.hist_bins).range(1..=100));
                     });
                     ui.horizontal(|ui| {
                         ui.label("X range:");
@@ -1578,7 +1578,7 @@ impl eframe::App for ParquetApp {
                     ui.horizontal(|ui| {
                         ui.label("New column:");
                         ui.text_edit_singleline(&mut self.new_col_name);
-                        egui::ComboBox::from_id_source("col_type")
+                        egui::ComboBox::from_id_salt("col_type")
                             .selected_text(if self.new_col_type.is_empty() {
                                 "Select".to_string()
                             } else {
@@ -1620,7 +1620,7 @@ impl eframe::App for ParquetApp {
                     });
 
                     egui::Grid::new("data_grid").show(ui, |ui| {
-                        for (i, row) in self.rows.iter_mut().enumerate() {
+                        for (_i, row) in self.rows.iter_mut().enumerate() {
                             for (j, _col) in self.schema.iter().enumerate() {
                                 ui.text_edit_singleline(&mut row[j]);
                             }
@@ -1726,7 +1726,7 @@ impl eframe::App for ParquetApp {
                         let filter = self.column_filters.entry(name.clone()).or_default();
                         ui.horizontal(|ui| {
                             ui.label(name);
-                            egui::ComboBox::from_id_source(format!("op_{name}"))
+                            egui::ComboBox::from_id_salt(format!("op_{name}"))
                                 .selected_text(match filter.op {
                                     FilterOp::Equals => "=",
                                     FilterOp::Contains => "contains",
@@ -1808,7 +1808,7 @@ impl eframe::App for ParquetApp {
                                 .xml_active_table
                                 .clone()
                                 .unwrap_or_else(|| "None".into());
-                            egui::ComboBox::from_id_source("xml_table")
+                            egui::ComboBox::from_id_salt("xml_table")
                                 .selected_text(current)
                                 .show_ui(ui, |ui| {
                                     for name in self.xml_tables.keys() {
@@ -1832,7 +1832,7 @@ impl eframe::App for ParquetApp {
                 _ => {}
             }
 
-            if let Some(df) = &self.edit_df {
+            if let Some(_df) = &self.edit_df {
                 ui.separator();
                 if let Some(meta) = &self.metadata {
                     ui.label("Metadata");
@@ -2048,7 +2048,7 @@ impl eframe::App for ParquetApp {
                         }
                     }
                     Operation::Xml => {
-                        match Polars_Parquet_Learning::xml_to_parquet::xml_to_parquet(
+                        match polars_parquet_learning::xml_to_parquet::xml_to_parquet(
                             &self.file_path,
                             &self.save_path,
                             self.xml_schema,
@@ -2253,7 +2253,7 @@ mod tests {
         use chrono::NaiveDateTime;
         let ndt =
             NaiveDateTime::parse_from_str("2024-01-01 12:34:56", "%Y-%m-%d %H:%M:%S").unwrap();
-        let expected = ndt.timestamp_micros();
+        let expected = ndt.and_utc().timestamp_micros();
         assert_eq!(
             df.column("ts").unwrap().datetime().unwrap().get(0),
             Some(expected)

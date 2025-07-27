@@ -1,6 +1,6 @@
 use polars::prelude::*;
 use std::fs::File;
-use Polars_Parquet_Learning::cli::{
+use polars_parquet_learning::cli::{
     self, Cli, Commands, ReadArgs, WriteArgs, CompressionArg, XmlArgs,
 };
 use parquet::basic::{Compression, GzipLevel};
@@ -59,7 +59,7 @@ fn cli_write_with_compression() {
     };
     cli::run(cli).unwrap();
     let meta =
-        Polars_Parquet_Learning::parquet_examples::read_parquet_metadata(output.to_str().unwrap())
+        polars_parquet_learning::parquet_examples::read_parquet_metadata(output.to_str().unwrap())
             .unwrap();
     assert_eq!(
         meta.row_group(0)

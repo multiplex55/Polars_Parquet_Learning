@@ -1,4 +1,4 @@
-use Polars_Parquet_Learning::parquet_examples::{join_on_key, group_by_sum, pivot_wider};
+use polars_parquet_learning::parquet_examples::{join_on_key, group_by_sum, pivot_wider};
 use polars::prelude::*;
 
 #[test]

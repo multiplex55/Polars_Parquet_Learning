@@ -1,5 +1,5 @@
 use polars::prelude::*;
-use Polars_Parquet_Learning::parquet_examples::summarize_dataframe;
+use polars_parquet_learning::parquet_examples::summarize_dataframe;
 
 #[test]
 fn summary_reports_size() -> anyhow::Result<()> {

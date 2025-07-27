@@ -1,4 +1,4 @@
-use Polars_Parquet_Learning::parquet_examples::{drop_column, rename_column, reorder_columns};
+use polars_parquet_learning::parquet_examples::{drop_column, rename_column, reorder_columns};
 use polars::prelude::*;
 
 #[test]

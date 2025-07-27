@@ -1,4 +1,4 @@
-use Polars_Parquet_Learning::{background, parquet_examples};
+use polars_parquet_learning::{background, parquet_examples};
 use polars::prelude::*;
 use parquet::basic::Compression;
 use std::sync::mpsc;

@@ -528,7 +528,7 @@ pub fn compute_histogram(
         return Ok((vec![0.0; bins], 0.0, 0.0));
     }
 
-    let (mut min, mut max) = match range {
+    let (min, max) = match range {
         Some(r) => r,
         None => {
             let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -598,7 +598,13 @@ pub fn join_on_key(left: &DataFrame, right: &DataFrame, key: &str) -> Result<Dat
 
 /// Group by `group` and compute the sum of `values`.
 pub fn group_by_sum(df: &DataFrame, group: &str, values: &str) -> Result<DataFrame> {
-    Ok(df.group_by([group])?.select([values]).sum()?)
+    Ok(
+        df.clone()
+            .lazy()
+            .group_by([col(group)])
+            .agg([col(values).sum()])
+            .collect()?,
+    )
 }
 
 /// Pivot long-form data into a wide layout.

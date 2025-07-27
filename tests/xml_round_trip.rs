@@ -1,6 +1,6 @@
 use tempfile::tempdir;
 
-use Polars_Parquet_Learning::{xml_examples, xml_to_parquet};
+use polars_parquet_learning::{xml_examples, xml_to_parquet};
 
 #[test]
 fn xml_examples_round_trip() -> anyhow::Result<()> {
