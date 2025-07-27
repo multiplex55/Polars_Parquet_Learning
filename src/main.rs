@@ -174,6 +174,8 @@ struct ParquetApp {
     xml_active_table: Option<String>,
     /// Current search text for highlighting cells
     search_text: String,
+    /// Whether search is case-insensitive
+    search_ignore_case: bool,
     /// Coordinates of matches in the current page
     search_matches: Vec<(usize, usize)>,
     /// Index of the active match
@@ -233,6 +235,7 @@ impl Default for ParquetApp {
             xml_selected: Vec::new(),
             xml_active_table: None,
             search_text: String::new(),
+            search_ignore_case: false,
             search_matches: Vec::new(),
             search_index: 0,
         }
@@ -634,17 +637,8 @@ impl ParquetApp {
     }
 
     fn update_search_matches(&mut self) {
-        self.search_matches.clear();
-        if self.search_text.is_empty() {
-            return;
-        }
-        for (r, row) in self.rows.iter().enumerate() {
-            for (c, cell) in row.iter().enumerate() {
-                if cell.contains(&self.search_text) {
-                    self.search_matches.push((r, c));
-                }
-            }
-        }
+        self.search_matches =
+            search::find_matches(&self.rows, &self.search_text, self.search_ignore_case);
         if self.search_index >= self.search_matches.len() {
             self.search_index = 0;
         }
@@ -724,7 +718,8 @@ impl eframe::App for ParquetApp {
                 ui.horizontal(|ui| {
                     ui.label("Search:");
                     let changed = ui.text_edit_singleline(&mut self.search_text).changed();
-                    if changed {
+                    let case_changed = ui.checkbox(&mut self.search_ignore_case, "Ignore case").changed();
+                    if changed || case_changed {
                         self.search_index = 0;
                         self.update_search_matches();
                     }
