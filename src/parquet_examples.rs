@@ -598,13 +598,12 @@ pub fn join_on_key(left: &DataFrame, right: &DataFrame, key: &str) -> Result<Dat
 
 /// Group by `group` and compute the sum of `values`.
 pub fn group_by_sum(df: &DataFrame, group: &str, values: &str) -> Result<DataFrame> {
-    Ok(
-        df.clone()
-            .lazy()
-            .group_by([col(group)])
-            .agg([col(values).sum()])
-            .collect()?,
-    )
+    Ok(df
+        .clone()
+        .lazy()
+        .group_by([col(group)])
+        .agg([col(values).sum()])
+        .collect()?)
 }
 
 /// Pivot long-form data into a wide layout.
@@ -736,6 +735,75 @@ pub fn read_parquet_metadata(path: &str) -> Result<parquet::file::metadata::Parq
     let file = File::open(path)?;
     let reader = SerializedFileReader::new(file)?;
     Ok(reader.metadata().clone())
+}
+
+/// Write small example datasets illustrating each operation to `dir`.
+pub fn write_example_data(dir: &str) -> Result<()> {
+    use std::path::Path;
+
+    let base = Path::new(dir);
+    std::fs::create_dir_all(base)?;
+
+    let folders = [
+        "read",
+        "modify",
+        "write",
+        "partition",
+        "query",
+        "xml",
+        "xml_dynamic",
+        "correlation",
+    ];
+    for f in &folders {
+        std::fs::create_dir_all(base.join(f))?;
+    }
+
+    // Read example
+    let df = df!("id" => &[1i64, 2], "name" => &["alice", "bob"])?;
+    create_and_write_parquet(&df, base.join("read/data.parquet").to_str().unwrap())?;
+
+    // Modify example
+    let df = df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
+    create_and_write_parquet(&df, base.join("modify/input.parquet").to_str().unwrap())?;
+
+    // Write example
+    let df = df!("id" => &[10i64, 20], "name" => &["foo", "bar"])?;
+    create_and_write_parquet(&df, base.join("write/input.parquet").to_str().unwrap())?;
+
+    // Partition example
+    let df = df!("id" => &[1i64, 2, 3], "group" => &["a", "b", "a"])?;
+    write_partitioned(&df, &["group"], base.join("partition").to_str().unwrap())?;
+
+    // Query example
+    let df = df!("id" => &[1i64, 2, 3], "name" => &["alice", "bob", "anne"])?;
+    create_and_write_parquet(&df, base.join("query/data.parquet").to_str().unwrap())?;
+
+    // XML examples
+    let root = crate::xml_examples::parse_sample_xml()?;
+    let tables = crate::xml_examples::root_to_tables(&root)?;
+    crate::xml_examples::write_tables_to_parquet(&tables, base.join("xml").to_str().unwrap())?;
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.xml"),
+        base.join("xml/sample.xml"),
+    )?;
+    crate::xml_examples::write_tables_to_parquet(
+        &tables,
+        base.join("xml_dynamic").to_str().unwrap(),
+    )?;
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/sample.xml"),
+        base.join("xml_dynamic/sample.xml"),
+    )?;
+
+    // Correlation example
+    let df = df!(
+        "a" => &[1.0f64, 2.0, 3.0],
+        "b" => &[1.0f64, 2.0, 3.0],
+        "c" => &[3.0f64, 2.0, 1.0]
+    )?;
+    create_and_write_parquet(&df, base.join("correlation/data.parquet").to_str().unwrap())?;
+
+    Ok(())
 }
 
 #[cfg(test)]

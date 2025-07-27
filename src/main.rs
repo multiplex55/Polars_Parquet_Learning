@@ -4,10 +4,8 @@
 pub mod background;
 pub mod cli;
 pub mod parquet_examples;
+pub mod xml_examples;
 
-use polars_parquet_learning::parquet_examples::quote_expr_value;
-use polars_parquet_learning::search;
-use polars_parquet_learning::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
 use background::{JobResult, JobUpdate};
 use clap::Parser;
@@ -17,9 +15,12 @@ use egui_plot::{BarChart, Line, Plot, PlotPoints};
 use parquet::basic::Compression;
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
+use polars_parquet_learning::parquet_examples::quote_expr_value;
+use polars_parquet_learning::search;
+use polars_parquet_learning::{xml_dynamic, xml_to_parquet};
 use rfd::FileDialog;
 use serde_json::Value;
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::mpsc;
 
@@ -55,7 +56,10 @@ impl Default for Operation {
 
 /// Help text for each [`Operation`] variant.
 const HELP_TEXT: &[(&str, &str)] = &[
-    ("Read", "Load an existing file into a DataFrame using the lazy API."),
+    (
+        "Read",
+        "Load an existing file into a DataFrame using the lazy API.",
+    ),
     (
         "Modify",
         "Convert rows to typed Records and append '!' to each name.",
@@ -434,9 +438,14 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
     DataFrame::new(cols).map_err(|e| e.into())
 }
 
-fn set_cell_value(df: &mut DataFrame, row: usize, col_idx: usize, value: &str) -> anyhow::Result<()> {
-    use polars::prelude::*;
+fn set_cell_value(
+    df: &mut DataFrame,
+    row: usize,
+    col_idx: usize,
+    value: &str,
+) -> anyhow::Result<()> {
     use polars::prelude::IdxSize;
+    use polars::prelude::*;
     let dtype = df.dtypes()[col_idx].clone();
     match dtype {
         DataType::Int64 => {
@@ -769,6 +778,19 @@ impl eframe::App for ParquetApp {
             if ui.button("Help").clicked() {
                 self.toggle_help();
             }
+            if ui.button("Create Examples").clicked() {
+                if let Some(dir) = FileDialog::new().pick_folder() {
+                    let path = dir.display().to_string();
+                    match parquet_examples::write_example_data(&path) {
+                        Ok(_) => {
+                            self.status = format!("Wrote examples to {}", path);
+                        }
+                        Err(e) => {
+                            self.status = format!("Failed to create examples: {e}");
+                        }
+                    }
+                }
+            }
         });
 
         if self.show_help {
@@ -915,26 +937,29 @@ impl eframe::App for ParquetApp {
                                         .position(|&(r, c)| r == row_idx && c == col_idx);
                                     let mut cell_changed = false;
                                     row.col(|ui| {
-                                        let mut edit = |ui: &mut egui::Ui| {
-                                            match dtype {
-                                                DataType::Boolean => {
-                                                    let mut checked = matches!(cell.as_str(), "true" | "1");
-                                                    if ui.checkbox(&mut checked, "").changed() {
-                                                        *cell = checked.to_string();
-                                                        if let Err(e) = set_cell_value(&mut df, row_idx, col_idx, cell) {
-                                                            self.status = format!("Edit failed: {e}");
-                                                        }
-                                                        cell_changed = true;
+                                        let mut edit = |ui: &mut egui::Ui| match dtype {
+                                            DataType::Boolean => {
+                                                let mut checked =
+                                                    matches!(cell.as_str(), "true" | "1");
+                                                if ui.checkbox(&mut checked, "").changed() {
+                                                    *cell = checked.to_string();
+                                                    if let Err(e) = set_cell_value(
+                                                        &mut df, row_idx, col_idx, cell,
+                                                    ) {
+                                                        self.status = format!("Edit failed: {e}");
                                                     }
+                                                    cell_changed = true;
                                                 }
-                                                _ => {
-                                                    let resp = ui.text_edit_singleline(cell);
-                                                    if resp.lost_focus() && resp.changed() {
-                                                        if let Err(e) = set_cell_value(&mut df, row_idx, col_idx, cell) {
-                                                            self.status = format!("Edit failed: {e}");
-                                                        }
-                                                        cell_changed = true;
+                                            }
+                                            _ => {
+                                                let resp = ui.text_edit_singleline(cell);
+                                                if resp.lost_focus() && resp.changed() {
+                                                    if let Err(e) = set_cell_value(
+                                                        &mut df, row_idx, col_idx, cell,
+                                                    ) {
+                                                        self.status = format!("Edit failed: {e}");
                                                     }
+                                                    cell_changed = true;
                                                 }
                                             }
                                         };
@@ -1032,9 +1057,11 @@ impl eframe::App for ParquetApp {
                     ui.label("New name:");
                     ui.text_edit_singleline(&mut self.new_name);
                     if ui.button("Rename").clicked() {
-                        if let Err(e) =
-                            parquet_examples::rename_column(&mut df, &self.rename_column, &self.new_name)
-                        {
+                        if let Err(e) = parquet_examples::rename_column(
+                            &mut df,
+                            &self.rename_column,
+                            &self.new_name,
+                        ) {
                             self.status = format!("Rename failed: {e}");
                         } else {
                             self.rename_column.clear();
@@ -1052,7 +1079,8 @@ impl eframe::App for ParquetApp {
                         {
                             if pos > 0 {
                                 self.column_order.swap(pos, pos - 1);
-                                if parquet_examples::reorder_columns(&mut df, &self.column_order).is_ok()
+                                if parquet_examples::reorder_columns(&mut df, &self.column_order)
+                                    .is_ok()
                                 {
                                     self.refresh_dataframe_state(&df);
                                 }
@@ -1067,7 +1095,8 @@ impl eframe::App for ParquetApp {
                         {
                             if pos + 1 < self.column_order.len() {
                                 self.column_order.swap(pos, pos + 1);
-                                if parquet_examples::reorder_columns(&mut df, &self.column_order).is_ok()
+                                if parquet_examples::reorder_columns(&mut df, &self.column_order)
+                                    .is_ok()
                                 {
                                     self.refresh_dataframe_state(&df);
                                 }
