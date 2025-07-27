@@ -80,6 +80,7 @@ common patterns:
 * **`group_by_sum`** – group rows by a column and sum another column.
 * **`pivot_wider`** – pivot data from long to wide form.
 * **`rolling_mean`** – compute a rolling window mean for a numeric column.
+* **`write_arrow_file`**/`read_arrow_file` – round-trip data using the Arrow IPC format.
 
 See [`src/parquet_examples.rs`](src/parquet_examples.rs) for implementation
 details and tests for each use case.

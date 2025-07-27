@@ -1,5 +1,6 @@
 use polars_parquet_learning::parquet_examples::{
-    self, read_parquet_to_dataframe, write_example_data,
+    self, dataframe_to_records, read_arrow_file, read_parquet_to_dataframe, write_arrow_file,
+    write_example_data,
 };
 use tempfile::tempdir;
 
@@ -55,5 +56,20 @@ fn writes_all_example_data() -> anyhow::Result<()> {
     )?;
     assert_eq!(df_c.get_column_names(), vec!["a", "b", "c"]);
 
+    Ok(())
+}
+
+#[test]
+fn arrow_round_trip() -> anyhow::Result<()> {
+    let dir = tempdir()?;
+    let path = dir.path().join("data.ipc");
+
+    let mut df = polars::df!("id" => &[1i64, 2], "name" => &["a", "b"])?;
+    let expected = dataframe_to_records(&df)?;
+
+    write_arrow_file(&mut df, path.to_str().unwrap())?;
+    let read = read_arrow_file(path.to_str().unwrap())?;
+    let out = dataframe_to_records(&read)?;
+    assert_eq!(expected, out);
     Ok(())
 }
