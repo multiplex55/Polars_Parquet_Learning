@@ -738,8 +738,9 @@ impl eframe::App for ParquetApp {
             }
         }
 
-        if let Some(df) = &mut self.edit_df {
+        if let Some(mut df) = self.edit_df.take() {
             let mut sort_after: Option<String> = None;
+            let mut matches_dirty = false;
             egui::SidePanel::right("preview_panel").show(ctx, |ui| {
                 ui.heading("Preview");
                 let end = (self.page_start + df.height()).min(self.total_rows);
@@ -852,48 +853,52 @@ impl eframe::App for ParquetApp {
                         for row_idx in 0..head.height() {
                             body.row(18.0, |mut row| {
                                 for col_idx in 0..df.width() {
-                                    let dtype = df.dtypes()[col_idx];
+                                    let dtype = df.dtypes()[col_idx].clone();
                                     let cell = &mut self.rows[row_idx][col_idx];
                                     let match_idx = self
                                         .search_matches
                                         .iter()
                                         .position(|&(r, c)| r == row_idx && c == col_idx);
-                                    let mut show_cell = |ui: &mut egui::Ui| match dtype {
-                                        DataType::Boolean => {
-                                            let mut checked = matches!(cell.as_str(), "true" | "1");
-                                            if ui.checkbox(&mut checked, "").changed() {
-                                                *cell = checked.to_string();
-                                                if let Err(e) =
-                                                    set_cell_value(df, row_idx, col_idx, cell)
-                                                {
-                                                    self.status = format!("Edit failed: {e}");
+                                    let mut cell_changed = false;
+                                    row.col(|ui| {
+                                        let mut edit = |ui: &mut egui::Ui| {
+                                            match dtype {
+                                                DataType::Boolean => {
+                                                    let mut checked = matches!(cell.as_str(), "true" | "1");
+                                                    if ui.checkbox(&mut checked, "").changed() {
+                                                        *cell = checked.to_string();
+                                                        if let Err(e) = set_cell_value(&mut df, row_idx, col_idx, cell) {
+                                                            self.status = format!("Edit failed: {e}");
+                                                        }
+                                                        cell_changed = true;
+                                                    }
                                                 }
-                                                self.update_search_matches();
-                                            }
-                                        }
-                                        _ => {
-                                            let resp = ui.text_edit_singleline(cell);
-                                            if resp.lost_focus() && resp.changed() {
-                                                if let Err(e) =
-                                                    set_cell_value(df, row_idx, col_idx, cell)
-                                                {
-                                                    self.status = format!("Edit failed: {e}");
+                                                _ => {
+                                                    let resp = ui.text_edit_singleline(cell);
+                                                    if resp.lost_focus() && resp.changed() {
+                                                        if let Err(e) = set_cell_value(&mut df, row_idx, col_idx, cell) {
+                                                            self.status = format!("Edit failed: {e}");
+                                                        }
+                                                        cell_changed = true;
+                                                    }
                                                 }
-                                                self.update_search_matches();
                                             }
-                                        }
-                                    };
-                                    if let Some(idx) = match_idx {
-                                        let color = if idx == self.search_index {
-                                            egui::Color32::from_rgb(255, 200, 200)
-                                        } else {
-                                            egui::Color32::from_rgb(255, 255, 0)
                                         };
-                                        egui::Frame::none().fill(color).show(ui, |ui| {
-                                            show_cell(ui);
-                                        });
-                                    } else {
-                                        show_cell(ui);
+                                        if let Some(idx) = match_idx {
+                                            let color = if idx == self.search_index {
+                                                egui::Color32::from_rgb(255, 200, 200)
+                                            } else {
+                                                egui::Color32::from_rgb(255, 255, 0)
+                                            };
+                                            egui::Frame::none().fill(color).show(ui, |ui| {
+                                                edit(ui);
+                                            });
+                                        } else {
+                                            edit(ui);
+                                        }
+                                    });
+                                    if cell_changed {
+                                        matches_dirty = true;
                                     }
                                 }
                             });
@@ -913,7 +918,7 @@ impl eframe::App for ParquetApp {
                     });
                 }
 
-                if let Ok(summary) = parquet_examples::summarize_dataframe(df) {
+                if let Ok(summary) = parquet_examples::summarize_dataframe(&df) {
                     ui.separator();
                     ui.label("Statistics");
                     ui.label(format!("Rows: {}", summary.rows));
@@ -974,13 +979,13 @@ impl eframe::App for ParquetApp {
                     ui.text_edit_singleline(&mut self.new_name);
                     if ui.button("Rename").clicked() {
                         if let Err(e) =
-                            parquet_examples::rename_column(df, &self.rename_column, &self.new_name)
+                            parquet_examples::rename_column(&mut df, &self.rename_column, &self.new_name)
                         {
                             self.status = format!("Rename failed: {e}");
                         } else {
                             self.rename_column.clear();
                             self.new_name.clear();
-                            self.refresh_dataframe_state(df);
+                            self.refresh_dataframe_state(&df);
                         }
                     }
                 });
@@ -993,9 +998,9 @@ impl eframe::App for ParquetApp {
                         {
                             if pos > 0 {
                                 self.column_order.swap(pos, pos - 1);
-                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok()
+                                if parquet_examples::reorder_columns(&mut df, &self.column_order).is_ok()
                                 {
-                                    self.refresh_dataframe_state(df);
+                                    self.refresh_dataframe_state(&df);
                                 }
                             }
                         }
@@ -1008,9 +1013,9 @@ impl eframe::App for ParquetApp {
                         {
                             if pos + 1 < self.column_order.len() {
                                 self.column_order.swap(pos, pos + 1);
-                                if parquet_examples::reorder_columns(df, &self.column_order).is_ok()
+                                if parquet_examples::reorder_columns(&mut df, &self.column_order).is_ok()
                                 {
-                                    self.refresh_dataframe_state(df);
+                                    self.refresh_dataframe_state(&df);
                                 }
                             }
                         }
@@ -1026,11 +1031,11 @@ impl eframe::App for ParquetApp {
                 }
                 if !drops.is_empty() {
                     for d in &drops {
-                        if parquet_examples::drop_column(df, d).is_ok() {
+                        if parquet_examples::drop_column(&mut df, d).is_ok() {
                             self.column_order.retain(|c| c != d);
                         }
                     }
-                    self.refresh_dataframe_state(df);
+                    self.refresh_dataframe_state(&df);
                 }
 
                 {
@@ -1264,12 +1269,16 @@ impl eframe::App for ParquetApp {
                 }
             });
 
+            if matches_dirty {
+                self.update_search_matches();
+            }
             if let Some(col) = sort_after {
                 if let Ok(sorted) = df.sort([col.as_str()], SortMultipleOptions::default()) {
-                    *df = sorted;
-                    self.refresh_dataframe_state(df);
+                    df = sorted;
                 }
             }
+            self.refresh_dataframe_state(&df);
+            self.edit_df = Some(df);
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1758,8 +1767,9 @@ impl eframe::App for ParquetApp {
                                 });
                             if let Some(name) = &self.xml_active_table {
                                 if let Some(df) = self.xml_tables.get(name) {
-                                    self.refresh_dataframe_state(df);
-                                    self.edit_df = Some(df.clone());
+                                    let cloned = df.clone();
+                                    self.refresh_dataframe_state(&cloned);
+                                    self.edit_df = Some(cloned);
                                 }
                             }
                         }
@@ -2029,8 +2039,9 @@ impl eframe::App for ParquetApp {
                                     if let Some(name) = self.xml_tables.keys().next().cloned() {
                                         self.xml_active_table = Some(name.clone());
                                         if let Some(df) = self.xml_tables.get(&name) {
-                                            self.refresh_dataframe_state(df);
-                                            self.edit_df = Some(df.clone());
+                                            let cloned = df.clone();
+                                            self.refresh_dataframe_state(&cloned);
+                                            self.edit_df = Some(cloned);
                                         }
                                     }
                                 }
