@@ -541,11 +541,7 @@ pub fn filter_with_exprs(path: &str, exprs: &[String]) -> Result<DataFrame> {
     }
     let mut df = lf.collect()?;
     for (col, val) in contains {
-        let series = df
-            .column(&col)?
-            .as_series()
-            .ok_or_else(|| anyhow::anyhow!("missing series"))?;
-        let mask = series.str()?.contains_literal(&val)?;
+        let mask = df.column(&col)?.str()?.contains_literal(&val)?;
         df = df.filter(&mask)?;
     }
     Ok(df)
@@ -566,11 +562,7 @@ pub fn filter_slice(path: &str, exprs: &[String], start: i64, len: usize) -> Res
     }
     let mut df = lf.collect()?;
     for (col, val) in contains {
-        let series = df
-            .column(&col)?
-            .as_series()
-            .ok_or_else(|| anyhow::anyhow!("missing series"))?;
-        let mask = series.str()?.contains_literal(&val)?;
+        let mask = df.column(&col)?.str()?.contains_literal(&val)?;
         df = df.filter(&mask)?;
     }
     Ok(df.slice(start, len))
