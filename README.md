@@ -113,6 +113,13 @@ Example reading a file:
 cargo run -- read path/to/file.parquet
 ```
 
+When writing files the `write` subcommand accepts an optional
+`--compression` flag which defaults to `snappy`:
+
+```
+cargo run -- write input.parquet output.parquet --compression gzip
+```
+
 ## Benchmarks
 
 Running `cargo bench` builds a small benchmark comparing the old per-file

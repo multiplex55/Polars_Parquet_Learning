@@ -16,6 +16,7 @@ use egui_extras::{Column as TableColumn, TableBuilder};
 use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
+use parquet::basic::Compression;
 use rfd::FileDialog;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -104,6 +105,8 @@ struct ParquetApp {
     /// Temporary inputs for adding columns
     new_col_name: String,
     new_col_type: String,
+    /// Compression used when writing Parquet files
+    compression: Compression,
     /// Selected column when partitioning via write mode
     partition_column: Option<String>,
     /// Selected columns when using the dedicated partition operation
@@ -200,6 +203,7 @@ impl Default for ParquetApp {
             column_order: Vec::new(),
             new_col_name: String::new(),
             new_col_type: String::new(),
+            compression: Compression::SNAPPY,
             partition_column: None,
             partition_columns: Vec::new(),
             correlation_columns: Vec::new(),
@@ -882,8 +886,9 @@ impl eframe::App for ParquetApp {
                     self.busy = true;
                     self.progress = Some(0.0);
                     self.status = "Saving...".into();
+                    let comp = self.compression;
                     self.runtime.spawn(async move {
-                        background::write_dataframe(df, file, tx).await;
+                        background::write_dataframe(df, file, comp, tx).await;
                     });
                 }
 
@@ -1539,6 +1544,39 @@ impl eframe::App for ParquetApp {
                                 }
                             });
                     }
+                    egui::ComboBox::from_label("Compression")
+                        .selected_text(match self.compression {
+                            Compression::UNCOMPRESSED => "None",
+                            Compression::SNAPPY => "Snappy",
+                            Compression::GZIP(_) => "Gzip",
+                            Compression::LZO => "Lzo",
+                            Compression::BROTLI(_) => "Brotli",
+                            Compression::LZ4 => "Lz4",
+                            Compression::ZSTD(_) => "Zstd",
+                            Compression::LZ4_RAW => "Lz4Raw",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.compression, Compression::UNCOMPRESSED, "None");
+                            ui.selectable_value(&mut self.compression, Compression::SNAPPY, "Snappy");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::GZIP(Default::default()),
+                                "Gzip",
+                            );
+                            ui.selectable_value(&mut self.compression, Compression::LZO, "Lzo");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::BROTLI(Default::default()),
+                                "Brotli",
+                            );
+                            ui.selectable_value(&mut self.compression, Compression::LZ4, "Lz4");
+                            ui.selectable_value(
+                                &mut self.compression,
+                                Compression::ZSTD(Default::default()),
+                                "Zstd",
+                            );
+                            ui.selectable_value(&mut self.compression, Compression::LZ4_RAW, "Lz4Raw");
+                        });
                 }
                 Operation::Partition => {
                     if let Some(df) = &self.edit_df {
@@ -1757,8 +1795,9 @@ impl eframe::App for ParquetApp {
                                 self.busy = true;
                                 self.progress = Some(0.0);
                                 self.status = "Writing...".into();
+                                let comp = self.compression;
                                 self.runtime.spawn(async move {
-                                    background::write_dataframe(df, file, tx).await;
+                                    background::write_dataframe(df, file, comp, tx).await;
                                 });
                             }
                         } else {

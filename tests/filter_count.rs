@@ -1,5 +1,6 @@
 use Polars_Parquet_Learning::{background, parquet_examples};
 use polars::prelude::*;
+use parquet::basic::Compression;
 use std::sync::mpsc;
 use tempfile::tempdir;
 
@@ -19,7 +20,11 @@ fn count_filtered_rows() -> anyhow::Result<()> {
         })
         .collect();
     let mut df = df!("id" => ids, "name" => names)?;
-    parquet_examples::write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+    parquet_examples::write_dataframe_to_parquet(
+        &mut df,
+        file.to_str().unwrap(),
+        parquet::basic::Compression::SNAPPY,
+    )?;
 
     let count =
         parquet_examples::filter_count(file.to_str().unwrap(), &["name == \"yes\"".to_string()])?;

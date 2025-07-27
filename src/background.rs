@@ -133,12 +133,13 @@ pub async fn read_filter_slice(
 pub async fn write_dataframe(
     mut df: DataFrame,
     path: String,
+    compression: parquet::basic::Compression,
     tx: Sender<anyhow::Result<JobUpdate>>,
 ) {
     run_with_progress(
         tx,
         move || {
-            parquet_examples::write_dataframe_to_parquet(&mut df, &path)?;
+            parquet_examples::write_dataframe_to_parquet(&mut df, &path, compression)?;
             Ok(())
         },
         |_| JobResult::Unit,

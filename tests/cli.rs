@@ -1,6 +1,9 @@
 use polars::prelude::*;
 use std::fs::File;
-use Polars_Parquet_Learning::cli::{self, Cli, Commands, ReadArgs, XmlArgs};
+use Polars_Parquet_Learning::cli::{
+    self, Cli, Commands, ReadArgs, WriteArgs, CompressionArg, XmlArgs,
+};
+use parquet::basic::{Compression, GzipLevel};
 use tempfile::tempdir;
 
 #[test]
@@ -35,4 +38,33 @@ fn cli_xml_creates_files() {
     cli::run(cli).unwrap();
     assert!(out_dir.join("templates.parquet").exists());
     assert!(out_dir.join("messages.parquet").exists());
+}
+
+#[test]
+fn cli_write_with_compression() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("in.parquet");
+    let output = dir.path().join("out.parquet");
+    let mut df = df!("id" => &[1i64], "name" => &["a"]).unwrap();
+    ParquetWriter::new(File::create(&input).unwrap())
+        .finish(&mut df)
+        .unwrap();
+
+    let cli = Cli {
+        command: Commands::Write(WriteArgs {
+            input: input.to_str().unwrap().to_string(),
+            output: output.to_str().unwrap().to_string(),
+            compression: CompressionArg::Gzip,
+        }),
+    };
+    cli::run(cli).unwrap();
+    let meta =
+        Polars_Parquet_Learning::parquet_examples::read_parquet_metadata(output.to_str().unwrap())
+            .unwrap();
+    assert_eq!(
+        meta.row_group(0)
+            .column(0)
+            .compression(),
+        parquet::basic::Compression::GZIP(parquet::basic::GzipLevel::default())
+    );
 }
