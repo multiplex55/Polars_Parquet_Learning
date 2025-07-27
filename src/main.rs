@@ -467,7 +467,7 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 Ok(ca.scatter_single(vec![row as IdxSize], Some(ns))?.into_series())
             })?;
         }
-        _ => return Err(anyhow::anyhow!(format!("unsupported type: {:?}", dtype))),
+        _ => anyhow::bail!("unsupported type: {:?}", dtype),
     }
     Ok(())
 }
