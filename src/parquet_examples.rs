@@ -608,7 +608,11 @@ pub fn filter_with_exprs(path: &str, exprs: &[String]) -> Result<DataFrame> {
     }
     let mut df = lf.collect()?;
     for (col, val) in contains {
-        let mask = df.column(&col)?.str()?.contains_literal(&val)?;
+        let series = df.column(&col)?;
+        if !matches!(series.dtype(), DataType::String) {
+            anyhow::bail!("'contains' only supported on string columns");
+        }
+        let mask = series.str()?.contains_literal(&val)?;
         df = df.filter(&mask)?;
     }
     Ok(df)
@@ -629,7 +633,11 @@ pub fn filter_slice(path: &str, exprs: &[String], start: i64, len: usize) -> Res
     }
     let mut df = lf.collect()?;
     for (col, val) in contains {
-        let mask = df.column(&col)?.str()?.contains_literal(&val)?;
+        let series = df.column(&col)?;
+        if !matches!(series.dtype(), DataType::String) {
+            anyhow::bail!("'contains' only supported on string columns");
+        }
+        let mask = series.str()?.contains_literal(&val)?;
         df = df.filter(&mask)?;
     }
     Ok(df.slice(start, len))
@@ -1037,6 +1045,23 @@ mod tests {
         assert_eq!(slice.height(), 2);
         let ids: Vec<i64> = slice.column("id")?.i64()?.into_no_null_iter().collect();
         assert_eq!(ids, vec![2, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn contains_on_non_string_returns_error() -> Result<()> {
+        let dir = tempdir()?;
+        let file = dir.path().join("data.parquet");
+
+        let mut df = df!("id" => &[1i64, 2, 3])?;
+        write_dataframe_to_parquet(&mut df, file.to_str().unwrap())?;
+
+        let exprs = vec!["id contains \"1\"".to_string()];
+        let res = filter_with_exprs(file.to_str().unwrap(), &exprs);
+        assert!(res.is_err());
+
+        let res_slice = filter_slice(file.to_str().unwrap(), &exprs, 0, 1);
+        assert!(res_slice.is_err());
         Ok(())
     }
 }
