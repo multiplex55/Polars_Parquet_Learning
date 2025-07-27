@@ -1126,11 +1126,17 @@ impl eframe::App for ParquetApp {
                                 match self.plot_type {
                                     PlotType::Histogram => {
                                         let (counts, min, step) =
-                                            parquet_examples::compute_histogram(
+                                            match parquet_examples::compute_histogram(
                                                 &values,
                                                 self.hist_bins,
                                                 self.x_range,
-                                            );
+                                            ) {
+                                                Ok(v) => v,
+                                                Err(e) => {
+                                                    eprintln!("failed to compute histogram: {}", e);
+                                                    (Vec::new(), 0.0, 0.0)
+                                                }
+                                            };
                                         let bars: Vec<_> = counts
                                             .iter()
                                             .enumerate()
