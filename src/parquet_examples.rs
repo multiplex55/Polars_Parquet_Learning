@@ -336,6 +336,73 @@ pub fn reorder_columns(df: &mut DataFrame, order: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Compute a correlation matrix for the provided numeric columns.
+///
+/// The returned [`DataFrame`] contains a `column` label column followed by
+/// each input column containing the pairwise Pearson correlation coefficients.
+pub fn correlation_matrix(df: &DataFrame, columns: &[&str]) -> Result<DataFrame> {
+    if columns.is_empty() {
+        return Ok(DataFrame::default());
+    }
+
+    // Collect each column as `f64` values once so we can efficiently reuse them
+    // when calculating all pairs.
+    let mut data: Vec<Vec<f64>> = Vec::with_capacity(columns.len());
+    for &name in columns {
+        let s = df.column(name)?;
+        let s = s.cast(&DataType::Float64)?;
+        let vals: Vec<f64> = s.f64()?.into_no_null_iter().collect();
+        data.push(vals);
+    }
+
+    // Compute correlation for every pair of columns.
+    let mut matrix: Vec<Vec<f64>> = Vec::with_capacity(columns.len());
+    for i in 0..columns.len() {
+        let mut row: Vec<f64> = Vec::with_capacity(columns.len());
+        for j in 0..columns.len() {
+            row.push(pearson_corr_slice(&data[i], &data[j]));
+        }
+        matrix.push(row);
+    }
+
+    // Assemble the result DataFrame with row/column labels.
+    use polars::prelude::Column;
+    let mut cols: Vec<Column> = Vec::with_capacity(columns.len() + 1);
+    cols.push(Column::new("column".into(), columns));
+    for (j, &name) in columns.iter().enumerate() {
+        let col_vals: Vec<f64> = matrix.iter().map(|row| row[j]).collect();
+        cols.push(Column::new(name.into(), col_vals));
+    }
+
+    Ok(DataFrame::new(cols)?)
+}
+
+/// Compute the Pearson correlation coefficient for two equal length slices.
+fn pearson_corr_slice(a: &[f64], b: &[f64]) -> f64 {
+    debug_assert_eq!(a.len(), b.len());
+    let n = a.len() as f64;
+    if n == 0.0 {
+        return 0.0;
+    }
+    let mean_a = a.iter().sum::<f64>() / n;
+    let mean_b = b.iter().sum::<f64>() / n;
+    let mut cov = 0.0;
+    let mut var_a = 0.0;
+    let mut var_b = 0.0;
+    for (&x, &y) in a.iter().zip(b.iter()) {
+        let da = x - mean_a;
+        let db = y - mean_b;
+        cov += da * db;
+        var_a += da * da;
+        var_b += db * db;
+    }
+    if var_a == 0.0 || var_b == 0.0 {
+        0.0
+    } else {
+        cov / (var_a.sqrt() * var_b.sqrt())
+    }
+}
+
 /// Write the [`DataFrame`] grouped by one or more columns into separate Parquet files.
 ///
 /// For a single column this writes `dir/<value>.parquet`. When multiple columns
