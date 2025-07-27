@@ -26,7 +26,7 @@ async fn run_with_progress<T, F>(
     T: Send + 'static,
     F: FnOnce() -> Result<T> + Send + 'static,
 {
-    let mut handle = task::spawn_blocking(job);
+    let handle = task::spawn_blocking(job);
     tokio::pin!(handle);
     let mut progress = 0.0f32;
     let _ = tx.send(Ok(JobUpdate::Progress(progress)));
