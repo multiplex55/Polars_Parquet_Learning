@@ -14,8 +14,10 @@ use egui_extras::{Column as TableColumn, TableBuilder};
 use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
+use serde_json::Value;
+use crate::{xml_dynamic, xml_to_parquet};
 use rfd::FileDialog;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::Path;
 use std::sync::mpsc;
 use crate::search;
@@ -38,6 +40,8 @@ enum Operation {
     Query,
     /// Convert an XML file to Parquet tables
     Xml,
+    /// Dynamically parse XML and map fields
+    XmlDynamic,
 }
 
 impl Default for Operation {
@@ -160,6 +164,14 @@ struct ParquetApp {
     use_directory: bool,
     /// Write an additional _schema.json when converting XML
     xml_schema: bool,
+    /// Parsed XML value when using XmlDynamic
+    xml_value: Option<serde_json::Value>,
+    /// DataFrames produced from the XML
+    xml_tables: std::collections::BTreeMap<String, DataFrame>,
+    /// Selected table names for conversion
+    xml_selected: Vec<String>,
+    /// Active table being edited
+    xml_active_table: Option<String>,
     /// Current search text for highlighting cells
     search_text: String,
     /// Coordinates of matches in the current page
@@ -216,6 +228,10 @@ impl Default for ParquetApp {
             progress: None,
             use_directory: false,
             xml_schema: false,
+            xml_value: None,
+            xml_tables: std::collections::BTreeMap::new(),
+            xml_selected: Vec::new(),
+            xml_active_table: None,
             search_text: String::new(),
             search_matches: Vec::new(),
             search_index: 0,
@@ -632,6 +648,49 @@ impl ParquetApp {
         }
         if self.search_index >= self.search_matches.len() {
             self.search_index = 0;
+        }
+    }
+
+    /// Display a serde_json `Value` recursively as a tree.
+    fn show_json(ui: &mut egui::Ui, value: &Value) {
+        match value {
+            Value::Object(map) => {
+                for (k, v) in map {
+                    egui::CollapsingHeader::new(k).show(ui, |ui| Self::show_json(ui, v));
+                }
+            }
+            Value::Array(arr) => {
+                for (i, v) in arr.iter().enumerate() {
+                    egui::CollapsingHeader::new(format!("[{i}]"))
+                        .show(ui, |ui| Self::show_json(ui, v));
+                }
+            }
+            other => {
+                ui.label(other.to_string());
+            }
+        }
+    }
+
+    /// Show top-level fields with checkboxes for mapping.
+    fn show_xml_mapping(ui: &mut egui::Ui, value: &Value, selected: &mut Vec<String>) {
+        if let Value::Object(map) = value {
+            for (k, v) in map {
+                let mut sel = selected.contains(k);
+                egui::CollapsingHeader::new(k).show(ui, |ui| {
+                    if v.is_array() {
+                        if ui.checkbox(&mut sel, "map").changed() {
+                            if sel {
+                                if !selected.contains(k) {
+                                    selected.push(k.clone());
+                                }
+                            } else {
+                                selected.retain(|s| s != k);
+                            }
+                        }
+                    }
+                    Self::show_json(ui, v);
+                });
+            }
         }
     }
 }
@@ -1308,7 +1367,7 @@ impl eframe::App for ParquetApp {
                         Operation::WriteJson => {
                             dialog = dialog.add_filter("JSON", &["json"]);
                         }
-                        Operation::Xml => {
+                        Operation::Xml | Operation::XmlDynamic => {
                             dialog = dialog.add_filter("XML", &["xml"]);
                         }
                         _ => {
@@ -1319,7 +1378,9 @@ impl eframe::App for ParquetApp {
                             }
                         }
                     }
-                    let picked = if self.use_directory && self.operation != Operation::Xml {
+                    let picked = if self.use_directory
+                        && !matches!(self.operation, Operation::Xml | Operation::XmlDynamic)
+                    {
                         dialog.pick_folder()
                     } else {
                         dialog.pick_file()
@@ -1343,6 +1404,7 @@ impl eframe::App for ParquetApp {
                 ui.radio_value(&mut self.operation, Operation::Partition, "Partition");
                 ui.radio_value(&mut self.operation, Operation::Query, "Query");
                 ui.radio_value(&mut self.operation, Operation::Xml, "XML");
+                ui.radio_value(&mut self.operation, Operation::XmlDynamic, "XML Dynamic");
             });
 
             ui.horizontal(|ui| {
@@ -1357,12 +1419,12 @@ impl eframe::App for ParquetApp {
                         Operation::WriteJson => {
                             dialog = dialog.add_filter("JSON", &["json"]);
                         }
-                        Operation::Xml => {}
+                        Operation::Xml | Operation::XmlDynamic => {}
                         _ => {
                             dialog = dialog.add_filter("Parquet", &["parquet"]);
                         }
                     }
-                    let picked = if self.operation == Operation::Xml {
+                    let picked = if matches!(self.operation, Operation::Xml | Operation::XmlDynamic) {
                         dialog.pick_folder()
                     } else {
                         dialog.save_file()
@@ -1508,6 +1570,46 @@ impl eframe::App for ParquetApp {
                 }
                 Operation::Xml => {
                     ui.checkbox(&mut self.xml_schema, "Write _schema.json");
+                }
+                Operation::XmlDynamic => {
+                    if ui.button("Load XML").clicked() {
+                        match xml_dynamic::parse_any_xml(&self.file_path) {
+                            Ok(v) => {
+                                self.xml_value = Some(v);
+                                self.xml_tables.clear();
+                                self.xml_selected.clear();
+                                self.xml_active_table = None;
+                                self.status.clear();
+                            }
+                            Err(e) => self.status = format!("Load failed: {e}"),
+                        }
+                    }
+                    if let Some(val) = &self.xml_value {
+                        Self::show_xml_mapping(ui, val, &mut self.xml_selected);
+                        if !self.xml_tables.is_empty() {
+                            let current = self
+                                .xml_active_table
+                                .clone()
+                                .unwrap_or_else(|| "None".into());
+                            egui::ComboBox::from_id_source("xml_table")
+                                .selected_text(current)
+                                .show_ui(ui, |ui| {
+                                    for name in self.xml_tables.keys() {
+                                        ui.selectable_value(
+                                            &mut self.xml_active_table,
+                                            Some(name.clone()),
+                                            name,
+                                        );
+                                    }
+                                });
+                            if let Some(name) = &self.xml_active_table {
+                                if let Some(df) = self.xml_tables.get(name) {
+                                    self.refresh_dataframe_state(df);
+                                    self.edit_df = Some(df.clone());
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1711,6 +1813,42 @@ impl eframe::App for ParquetApp {
                                 self.status = format!("Wrote Parquet tables to {}", self.save_path);
                             }
                             Err(e) => self.status = format!("XML conversion failed: {e}"),
+                        }
+                    }
+                    Operation::XmlDynamic => {
+                        if let Some(value) = &self.xml_value {
+                            match xml_dynamic::value_to_tables(value) {
+                                Ok(mut tables) => {
+                                    if !self.xml_selected.is_empty() {
+                                        tables.retain(|k, _| self.xml_selected.contains(k));
+                                    }
+                                    self.xml_tables = tables.clone();
+                                    if !self.save_path.is_empty() {
+                                        let mut map: BTreeMap<&str, DataFrame> = BTreeMap::new();
+                                        for (k, v) in &mut tables {
+                                            map.insert(k.as_str(), v.clone());
+                                        }
+                                        match xml_to_parquet::write_tables(&map, &self.save_path, self.xml_schema) {
+                                            Ok(_) => {
+                                                self.status = format!("Wrote Parquet tables to {}", self.save_path);
+                                            }
+                                            Err(e) => self.status = format!("XML conversion failed: {e}"),
+                                        }
+                                    } else {
+                                        self.status = "Parsed XML".into();
+                                    }
+                                    if let Some(name) = self.xml_tables.keys().next().cloned() {
+                                        self.xml_active_table = Some(name.clone());
+                                        if let Some(df) = self.xml_tables.get(&name) {
+                                            self.refresh_dataframe_state(df);
+                                            self.edit_df = Some(df.clone());
+                                        }
+                                    }
+                                }
+                                Err(e) => self.status = format!("Parse failed: {e}"),
+                            }
+                        } else {
+                            self.status = "Load an XML file first.".into();
                         }
                     }
                 }
