@@ -5,6 +5,8 @@ pub mod background;
 pub mod cli;
 pub mod parquet_examples;
 
+use crate::search;
+use crate::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
 use background::{JobResult, JobUpdate};
 use clap::Parser;
@@ -14,13 +16,11 @@ use egui_extras::{Column as TableColumn, TableBuilder};
 use egui_plot::{BarChart, BoxElem, BoxPlot, Line, Plot, PlotPoints, Points};
 use polars::prelude::SortMultipleOptions;
 use polars::prelude::*;
-use serde_json::Value;
-use crate::{xml_dynamic, xml_to_parquet};
 use rfd::FileDialog;
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::Path;
 use std::sync::mpsc;
-use crate::search;
 
 /// Defines the user selected operation on the Parquet file.
 #[derive(Debug, PartialEq)]
@@ -42,6 +42,8 @@ enum Operation {
     Xml,
     /// Dynamically parse XML and map fields
     XmlDynamic,
+    /// Compute correlation matrix for numeric columns
+    Correlation,
 }
 
 impl Default for Operation {
@@ -106,6 +108,8 @@ struct ParquetApp {
     partition_column: Option<String>,
     /// Selected columns when using the dedicated partition operation
     partition_columns: Vec<String>,
+    /// Selected numeric columns for correlation matrix
+    correlation_columns: Vec<String>,
     /// Query prefix when using the query operation
     query_prefix: String,
     /// Expression string when using the query operation
@@ -198,6 +202,7 @@ impl Default for ParquetApp {
             new_col_type: String::new(),
             partition_column: None,
             partition_columns: Vec::new(),
+            correlation_columns: Vec::new(),
             query_prefix: String::new(),
             query_expr: String::new(),
             column_filters: std::collections::HashMap::new(),
@@ -442,10 +447,7 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                     .map(|dt| dt.timestamp_micros())
                     .or_else(|_| {
                         NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
-                            .or_else(|_| NaiveDateTime::parse_from_str(
-                                value,
-                                "%Y-%m-%dT%H:%M:%S",
-                            ))
+                            .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
                             .map(|dt| dt.timestamp_micros())
                     })?;
                 ca.scatter_single(vec![row as IdxSize], Some(ts))?
@@ -455,8 +457,8 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                 use chrono::{NaiveTime, Timelike};
                 let ca = c.time()?;
                 let t = NaiveTime::parse_from_str(value, "%H:%M:%S")?;
-                let ns = (t.num_seconds_from_midnight() as i64) * 1_000_000_000
-                    + t.nanosecond() as i64;
+                let ns =
+                    (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
                 ca.scatter_single(vec![row as IdxSize], Some(ns))?
                     .into_series()
             }
@@ -633,6 +635,12 @@ impl ParquetApp {
             .iter()
             .map(|s| s.to_string())
             .collect();
+        self.correlation_columns = self
+            .loaded_schema
+            .iter()
+            .filter(|(_, t)| matches!(t, DataType::Int64 | DataType::Float64))
+            .map(|(n, _)| n.clone())
+            .collect();
         self.update_search_matches();
     }
 
@@ -718,19 +726,27 @@ impl eframe::App for ParquetApp {
                 ui.horizontal(|ui| {
                     ui.label("Search:");
                     let changed = ui.text_edit_singleline(&mut self.search_text).changed();
-                    let case_changed = ui.checkbox(&mut self.search_ignore_case, "Ignore case").changed();
+                    let case_changed = ui
+                        .checkbox(&mut self.search_ignore_case, "Ignore case")
+                        .changed();
                     if changed || case_changed {
                         self.search_index = 0;
                         self.update_search_matches();
                     }
                     if !self.search_matches.is_empty() {
                         if ui.button("Previous").clicked() {
-                            self.search_index = search::prev_index(self.search_index, &self.search_matches);
+                            self.search_index =
+                                search::prev_index(self.search_index, &self.search_matches);
                         }
                         if ui.button("Next").clicked() {
-                            self.search_index = search::next_index(self.search_index, &self.search_matches);
+                            self.search_index =
+                                search::next_index(self.search_index, &self.search_matches);
                         }
-                        ui.label(format!("{}/{}", self.search_index + 1, self.search_matches.len()));
+                        ui.label(format!(
+                            "{}/{}",
+                            self.search_index + 1,
+                            self.search_matches.len()
+                        ));
                     }
                 });
                 if self.total_rows > self.page_size {
@@ -1086,7 +1102,11 @@ impl eframe::App for ParquetApp {
                                 match self.plot_type {
                                     PlotType::Histogram => {
                                         let (counts, min, step) =
-                                            parquet_examples::compute_histogram(&values, self.hist_bins, self.x_range);
+                                            parquet_examples::compute_histogram(
+                                                &values,
+                                                self.hist_bins,
+                                                self.x_range,
+                                            );
                                         let bars: Vec<_> = counts
                                             .iter()
                                             .enumerate()
@@ -1153,7 +1173,8 @@ impl eframe::App for ParquetApp {
                                                     plot = plot.default_y_bounds(ymin, ymax);
                                                 }
                                                 plot.show(ui, |plot_ui| {
-                                                    plot_ui.points(egui_plot::Points::new("", points));
+                                                    plot_ui
+                                                        .points(egui_plot::Points::new("", points));
                                                 });
                                             }
                                         }
@@ -1407,6 +1428,7 @@ impl eframe::App for ParquetApp {
                 ui.radio_value(&mut self.operation, Operation::Create, "Create");
                 ui.radio_value(&mut self.operation, Operation::Partition, "Partition");
                 ui.radio_value(&mut self.operation, Operation::Query, "Query");
+                ui.radio_value(&mut self.operation, Operation::Correlation, "Correlation");
                 ui.radio_value(&mut self.operation, Operation::Xml, "XML");
                 ui.radio_value(&mut self.operation, Operation::XmlDynamic, "XML Dynamic");
             });
@@ -1428,7 +1450,8 @@ impl eframe::App for ParquetApp {
                             dialog = dialog.add_filter("Parquet", &["parquet"]);
                         }
                     }
-                    let picked = if matches!(self.operation, Operation::Xml | Operation::XmlDynamic) {
+                    let picked = if matches!(self.operation, Operation::Xml | Operation::XmlDynamic)
+                    {
                         dialog.pick_folder()
                     } else {
                         dialog.save_file()
@@ -1451,9 +1474,8 @@ impl eframe::App for ParquetApp {
                                 self.new_col_type.clone()
                             })
                             .show_ui(ui, |ui| {
-                                for t in [
-                                    "int", "str", "float", "bool", "date", "datetime", "time",
-                                ] {
+                                for t in ["int", "str", "float", "bool", "date", "datetime", "time"]
+                                {
                                     ui.selectable_value(&mut self.new_col_type, t.to_string(), t);
                                 }
                             });
@@ -1572,6 +1594,25 @@ impl eframe::App for ParquetApp {
                         self.apply_filters();
                     }
                 }
+                Operation::Correlation => {
+                    if let Some(_df) = &self.edit_df {
+                        ui.label("Columns:");
+                        for (name, dtype) in &self.loaded_schema {
+                            if matches!(dtype, DataType::Int64 | DataType::Float64) {
+                                let mut selected = self.correlation_columns.contains(name);
+                                if ui.checkbox(&mut selected, name).changed() {
+                                    if selected {
+                                        if !self.correlation_columns.contains(name) {
+                                            self.correlation_columns.push(name.clone());
+                                        }
+                                    } else {
+                                        self.correlation_columns.retain(|c| c != name);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 Operation::Xml => {
                     ui.checkbox(&mut self.xml_schema, "Write _schema.json");
                 }
@@ -1658,7 +1699,7 @@ impl eframe::App for ParquetApp {
             // Run the selected action
             let requires_df = matches!(
                 self.operation,
-                Operation::Write | Operation::Partition | Operation::Query
+                Operation::Write | Operation::Partition | Operation::Query | Operation::Correlation
             );
             let run_enabled = !self.busy && !(requires_df && self.edit_df.is_none());
             let run_clicked = ui
@@ -1807,6 +1848,29 @@ impl eframe::App for ParquetApp {
                             self.status = "Load or create a DataFrame first.".into();
                         }
                     }
+                    Operation::Correlation => {
+                        if let Some(df) = &self.edit_df {
+                            if !self.correlation_columns.is_empty() {
+                                let cols: Vec<&str> = self
+                                    .correlation_columns
+                                    .iter()
+                                    .map(String::as_str)
+                                    .collect();
+                                match parquet_examples::correlation_matrix(df, &cols) {
+                                    Ok(corr) => {
+                                        self.status = "Computed correlation matrix".into();
+                                        self.refresh_dataframe_state(&corr);
+                                        self.edit_df = Some(corr);
+                                    }
+                                    Err(e) => self.status = format!("Correlation failed: {e}"),
+                                }
+                            } else {
+                                self.status = "Select one or more columns.".into();
+                            }
+                        } else {
+                            self.status = "Load or create a DataFrame first.".into();
+                        }
+                    }
                     Operation::Xml => {
                         match Polars_Parquet_Learning::xml_to_parquet::xml_to_parquet(
                             &self.file_path,
@@ -1832,11 +1896,20 @@ impl eframe::App for ParquetApp {
                                         for (k, v) in &mut tables {
                                             map.insert(k.as_str(), v.clone());
                                         }
-                                        match xml_to_parquet::write_tables(&map, &self.save_path, self.xml_schema) {
+                                        match xml_to_parquet::write_tables(
+                                            &map,
+                                            &self.save_path,
+                                            self.xml_schema,
+                                        ) {
                                             Ok(_) => {
-                                                self.status = format!("Wrote Parquet tables to {}", self.save_path);
+                                                self.status = format!(
+                                                    "Wrote Parquet tables to {}",
+                                                    self.save_path
+                                                );
                                             }
-                                            Err(e) => self.status = format!("XML conversion failed: {e}"),
+                                            Err(e) => {
+                                                self.status = format!("XML conversion failed: {e}")
+                                            }
                                         }
                                     } else {
                                         self.status = "Parsed XML".into();
@@ -1985,21 +2058,29 @@ mod tests {
         let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
         let nd = NaiveDate::parse_from_str("2024-06-15", "%Y-%m-%d").unwrap();
         let expected = (nd - epoch).num_days() as i32;
-        assert_eq!(df.column("when").unwrap().date().unwrap().get(0), Some(expected));
+        assert_eq!(
+            df.column("when").unwrap().date().unwrap().get(0),
+            Some(expected)
+        );
     }
 
     #[test]
     fn set_cell_value_updates_datetime() {
-        let schema = vec![
-            ("ts".to_string(), DataType::Datetime(TimeUnit::Microseconds, None)),
-        ];
+        let schema = vec![(
+            "ts".to_string(),
+            DataType::Datetime(TimeUnit::Microseconds, None),
+        )];
         let rows = vec![vec!["2024-01-01T00:00:00".to_string()]];
         let mut df = build_dataframe(&schema, &rows).unwrap();
         set_cell_value(&mut df, 0, 0, "2024-01-01 12:34:56").unwrap();
         use chrono::NaiveDateTime;
-        let ndt = NaiveDateTime::parse_from_str("2024-01-01 12:34:56", "%Y-%m-%d %H:%M:%S").unwrap();
+        let ndt =
+            NaiveDateTime::parse_from_str("2024-01-01 12:34:56", "%Y-%m-%d %H:%M:%S").unwrap();
         let expected = ndt.timestamp_micros();
-        assert_eq!(df.column("ts").unwrap().datetime().unwrap().get(0), Some(expected));
+        assert_eq!(
+            df.column("ts").unwrap().datetime().unwrap().get(0),
+            Some(expected)
+        );
     }
 
     #[test]
@@ -2010,8 +2091,12 @@ mod tests {
         set_cell_value(&mut df, 0, 0, "04:05:06").unwrap();
         use chrono::{NaiveTime, Timelike};
         let nt = NaiveTime::parse_from_str("04:05:06", "%H:%M:%S").unwrap();
-        let expected = (nt.num_seconds_from_midnight() as i64) * 1_000_000_000 + nt.nanosecond() as i64;
-        assert_eq!(df.column("t").unwrap().time().unwrap().get(0), Some(expected));
+        let expected =
+            (nt.num_seconds_from_midnight() as i64) * 1_000_000_000 + nt.nanosecond() as i64;
+        assert_eq!(
+            df.column("t").unwrap().time().unwrap().get(0),
+            Some(expected)
+        );
     }
 
     #[test]
@@ -2031,11 +2116,7 @@ mod tests {
     #[test]
     fn boxplot_handles_nan() {
         let values = vec![1.0, f64::NAN, 2.0, 3.0];
-        let mut filtered: Vec<f64> = values
-            .iter()
-            .cloned()
-            .filter(|v| !v.is_nan())
-            .collect();
+        let mut filtered: Vec<f64> = values.iter().cloned().filter(|v| !v.is_nan()).collect();
         filtered.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let len = filtered.len();
         assert!(len > 0);
