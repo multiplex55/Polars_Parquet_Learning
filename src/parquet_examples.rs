@@ -782,6 +782,7 @@ pub fn write_example_data(dir: &str) -> Result<()> {
         "xml",
         "xml_dynamic",
         "correlation",
+        "datasets",
     ];
     for f in &folders {
         std::fs::create_dir_all(base.join(f))?;
@@ -831,6 +832,26 @@ pub fn write_example_data(dir: &str) -> Result<()> {
         "c" => &[3.0f64, 2.0, 1.0]
     )?;
     create_and_write_parquet(&df, base.join("correlation/data.parquet").to_str().unwrap())?;
+
+    // Bundled datasets
+    std::fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/numeric.parquet"
+        ),
+        base.join("datasets/numeric.parquet"),
+    )?;
+    std::fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/temporal.parquet"
+        ),
+        base.join("datasets/temporal.parquet"),
+    )?;
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/nested.parquet"),
+        base.join("datasets/nested.parquet"),
+    )?;
 
     Ok(())
 }

@@ -35,7 +35,11 @@ in `target/release/polars_parquet_learning`.
 5. Click **Run** to perform the selected action. Status is printed to stdout.
 
 The helper functions live in [`src/parquet_examples.rs`](src/parquet_examples.rs)
-and are covered by the `round_trip` unit test.
+and are covered by the `round_trip` unit test. Small example datasets such as
+[`numeric.parquet`](tests/fixtures/numeric.parquet),
+[`temporal.parquet`](tests/fixtures/temporal.parquet) and
+[`nested.parquet`](tests/fixtures/nested.parquet) are bundled under
+`tests/fixtures` for experimentation.
 
 ## Polars and Parquet notes
 
@@ -109,7 +113,7 @@ cargo run -- <SUBCOMMAND> [OPTIONS]
 Example reading a file:
 
 ```
-cargo run -- read path/to/file.parquet
+cargo run -- read tests/fixtures/numeric.parquet
 ```
 
 When writing files the `write` subcommand accepts an optional
