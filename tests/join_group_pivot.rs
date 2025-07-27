@@ -1,4 +1,4 @@
-use polars_parquet_learning::parquet_examples::{join_on_key, group_by_sum, pivot_wider};
+use polars_parquet_learning::parquet_examples::{join_on_key, group_by_sum, pivot_wider, rolling_mean, write_dataframe_to_parquet};
 use polars::prelude::*;
 
 #[test]
@@ -37,5 +37,26 @@ fn pivot_to_wide() -> anyhow::Result<()> {
     assert_eq!(wide.height(), 2);
     assert!(wide.column("A").is_ok());
     assert!(wide.column("B").is_ok());
+    Ok(())
+}
+
+#[test]
+fn rolling_window_mean() -> anyhow::Result<()> {
+    use parquet::basic::Compression;
+    use tempfile::tempdir;
+
+    let dir = tempdir()?;
+    let file = dir.path().join("data.parquet");
+
+    let mut df = df!("val" => &[1.0f64, 2.0, 3.0, 4.0, 5.0])?;
+    write_dataframe_to_parquet(&mut df, file.to_str().unwrap(), Compression::SNAPPY)?;
+
+    let rolled = rolling_mean(file.to_str().unwrap(), "val", 2)?;
+    let vals: Vec<f64> = rolled
+        .column("rolling_mean")?
+        .f64()?
+        .into_no_null_iter()
+        .collect();
+    assert_eq!(vals, vec![1.0, 1.5, 2.5, 3.5, 4.5]);
     Ok(())
 }
