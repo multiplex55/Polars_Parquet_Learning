@@ -406,41 +406,46 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
     use polars::prelude::*;
     use polars::utils::IdxSize;
     let dtype = df.dtypes()[col].clone();
-    df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
-        let series = match dtype {
-            DataType::Int64 => {
+    match dtype {
+        DataType::Int64 => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.i64()?;
                 let val = value.parse::<i64>()?;
-                ca.scatter_single(vec![row as IdxSize], Some(val))?
-                    .into_series()
-            }
-            DataType::Float64 => {
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+            })?;
+        }
+        DataType::Float64 => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.f64()?;
                 let val = value.parse::<f64>()?;
-                ca.scatter_single(vec![row as IdxSize], Some(val))?
-                    .into_series()
-            }
-            DataType::Boolean => {
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+            })?;
+        }
+        DataType::Boolean => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.bool()?;
                 let val = matches!(value.to_lowercase().as_str(), "true" | "1");
-                ca.scatter_single(vec![row as IdxSize], Some(val))?
-                    .into_series()
-            }
-            DataType::String => {
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(val))?.into_series())
+            })?;
+        }
+        DataType::String => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 let ca = c.str()?;
-                ca.scatter_single(vec![row as IdxSize], Some(value))?
-                    .into_series()
-            }
-            DataType::Date => {
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(value))?.into_series())
+            })?;
+        }
+        DataType::Date => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 use chrono::NaiveDate;
                 let ca = c.date()?;
                 let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
                 let d = NaiveDate::parse_from_str(value, "%Y-%m-%d")?;
                 let days = (d - epoch).num_days() as i32;
-                ca.scatter_single(vec![row as IdxSize], Some(days))?
-                    .into_series()
-            }
-            DataType::Datetime(_, _) => {
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(days))?.into_series())
+            })?;
+        }
+        DataType::Datetime(_, _) => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 use chrono::{DateTime, NaiveDateTime};
                 let ca = c.datetime()?;
                 let ts = DateTime::parse_from_rfc3339(value)
@@ -450,22 +455,20 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                             .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
                             .map(|dt| dt.timestamp_micros())
                     })?;
-                ca.scatter_single(vec![row as IdxSize], Some(ts))?
-                    .into_series()
-            }
-            DataType::Time => {
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(ts))?.into_series())
+            })?;
+        }
+        DataType::Time => {
+            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
                 use chrono::{NaiveTime, Timelike};
                 let ca = c.time()?;
                 let t = NaiveTime::parse_from_str(value, "%H:%M:%S")?;
-                let ns =
-                    (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
-                ca.scatter_single(vec![row as IdxSize], Some(ns))?
-                    .into_series()
-            }
-            _ => c.clone(),
-        };
-        Ok(series)
-    })?;
+                let ns = (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
+                Ok(ca.scatter_single(vec![row as IdxSize], Some(ns))?.into_series())
+            })?;
+        }
+        _ => return Err(anyhow::anyhow!(format!("unsupported type: {:?}", dtype))),
+    }
     Ok(())
 }
 
@@ -2097,6 +2100,15 @@ mod tests {
             df.column("t").unwrap().time().unwrap().get(0),
             Some(expected)
         );
+    }
+
+    #[test]
+    fn set_cell_value_errors_on_categorical() {
+        let s = Series::new("cat", ["a", "b"]);
+        let cat = s.cast(&DataType::Categorical(None)).unwrap();
+        let mut df = DataFrame::new(vec![cat]).unwrap();
+        let err = set_cell_value(&mut df, 0, 0, "c").unwrap_err();
+        assert!(err.to_string().contains("unsupported type"));
     }
 
     #[test]
