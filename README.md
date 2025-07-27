@@ -75,8 +75,10 @@ common patterns:
   are collected into a `DataFrame`.
 * **`read_parquet_metadata`** – inspect low level metadata with the `parquet`
   crate without loading the entire file.
-* **`read_partitions`** – load all Parquet files from a directory pattern with a single
-  `scan_parquet` call.
+* **`read_partitions`** – load all Parquet files from a directory pattern with a single `scan_parquet` call.
+* **`join_on_key`** – join two DataFrames on a common column.
+* **`group_by_sum`** – group rows by a column and sum another column.
+* **`pivot_wider`** – pivot data from long to wide form.
 
 See [`src/parquet_examples.rs`](src/parquet_examples.rs) for implementation
 details and tests for each use case.

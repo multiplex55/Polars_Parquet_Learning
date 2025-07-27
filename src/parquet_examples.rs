@@ -591,6 +591,31 @@ pub fn filter_with_expr(path: &str, expr: &str) -> Result<DataFrame> {
     Ok(lf.filter(filter).collect()?)
 }
 
+/// Join two [`DataFrame`]s on a key column using an inner join.
+pub fn join_on_key(left: &DataFrame, right: &DataFrame, key: &str) -> Result<DataFrame> {
+    Ok(left.join(right, [key], [key], JoinArgs::from(JoinType::Inner), None)?)
+}
+
+/// Group by `group` and compute the sum of `values`.
+pub fn group_by_sum(df: &DataFrame, group: &str, values: &str) -> Result<DataFrame> {
+    Ok(df.group_by([group])?.select([values]).sum()?)
+}
+
+/// Pivot long-form data into a wide layout.
+pub fn pivot_wider(df: &DataFrame, index: &str, columns: &str, values: &str) -> Result<DataFrame> {
+    use polars::lazy::frame::pivot::pivot_stable;
+
+    Ok(pivot_stable(
+        df,
+        [columns],
+        Some([index]),
+        Some([values]),
+        true,
+        Some(first()),
+        None,
+    )?)
+}
+
 fn parse_simple_expr(s: &str) -> Result<Expr> {
     let parts: Vec<String> = shlex::Shlex::new(s).collect();
     if parts.len() != 3 {
