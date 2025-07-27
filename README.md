@@ -89,10 +89,11 @@ details and tests for each use case.
 ## Creating a DataFrame from scratch
 
 Choose the **Create** mode in the GUI to build a brand new dataset. Add column
-names and their types then enter one or more rows of data. Providing a path in
-the **Save** field will write the result as a Parquet file when **Run** is
-clicked. The helper function [`create_dataframe`](src/parquet_examples.rs) shows
-how to accomplish the same programmatically.
+names and pick their types from a drop-down list, then enter one or more rows of
+data. Providing a path in the **Save** field will write the result as a Parquet
+file when **Run** is clicked. The helper function
+[`create_dataframe`](src/parquet_examples.rs) shows how to accomplish the same
+programmatically.
 
 Allowed column types are `int`/`i64`, `str`/`string`, `float`/`f64`,
 `bool`/`boolean`, `date`, `datetime` and `time`.

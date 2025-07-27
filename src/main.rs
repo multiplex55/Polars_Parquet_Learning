@@ -1378,7 +1378,19 @@ impl eframe::App for ParquetApp {
                     ui.horizontal(|ui| {
                         ui.label("New column:");
                         ui.text_edit_singleline(&mut self.new_col_name);
-                        ui.text_edit_singleline(&mut self.new_col_type);
+                        egui::ComboBox::from_id_source("col_type")
+                            .selected_text(if self.new_col_type.is_empty() {
+                                "Select".to_string()
+                            } else {
+                                self.new_col_type.clone()
+                            })
+                            .show_ui(ui, |ui| {
+                                for t in [
+                                    "int", "str", "float", "bool", "date", "datetime", "time",
+                                ] {
+                                    ui.selectable_value(&mut self.new_col_type, t.to_string(), t);
+                                }
+                            });
                         if ui.button("Add").clicked() {
                             if let Ok(dtype) = parse_dtype(&self.new_col_type) {
                                 self.schema.push((self.new_col_name.clone(), dtype));
