@@ -5,9 +5,9 @@ pub mod background;
 pub mod cli;
 pub mod parquet_examples;
 
-use polars_parquet_learning::parquet_examples::quote_expr_value;
-use polars_parquet_learning::search;
-use polars_parquet_learning::{xml_dynamic, xml_to_parquet};
+use Polars_Parquet_Learning::parquet_examples::quote_expr_value;
+use Polars_Parquet_Learning::search;
+use Polars_Parquet_Learning::{xml_dynamic, xml_to_parquet};
 use anyhow::Result;
 use background::{JobResult, JobUpdate};
 use clap::Parser;
@@ -396,31 +396,35 @@ fn build_dataframe(schema: &[(String, DataType)], rows: &[Vec<String>]) -> Resul
     DataFrame::new(cols).map_err(|e| e.into())
 }
 
-fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> anyhow::Result<()> {
+fn set_cell_value(df: &mut DataFrame, row: usize, col_idx: usize, value: &str) -> anyhow::Result<()> {
     use polars::prelude::*;
-    use polars::utils::IdxSize;
-    let dtype = df.dtypes()[col].clone();
+    use polars::prelude::IdxSize;
+    let dtype = df.dtypes()[col_idx].clone();
     match dtype {
         DataType::Int64 => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 let ca = c.i64()?;
-                let val = value.parse::<i64>()?;
+                let val = value
+                    .parse::<i64>()
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
                 Ok(ca
                     .scatter_single(vec![row as IdxSize], Some(val))?
                     .into_series())
             })?;
         }
         DataType::Float64 => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 let ca = c.f64()?;
-                let val = value.parse::<f64>()?;
+                let val = value
+                    .parse::<f64>()
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
                 Ok(ca
                     .scatter_single(vec![row as IdxSize], Some(val))?
                     .into_series())
             })?;
         }
         DataType::Boolean => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 let ca = c.bool()?;
                 let val = matches!(value.to_lowercase().as_str(), "true" | "1");
                 Ok(ca
@@ -429,7 +433,7 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
             })?;
         }
         DataType::String => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 let ca = c.str()?;
                 Ok(ca
                     .scatter_single(vec![row as IdxSize], Some(value))?
@@ -437,11 +441,12 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
             })?;
         }
         DataType::Date => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 use chrono::NaiveDate;
                 let ca = c.date()?;
                 let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
-                let d = NaiveDate::parse_from_str(value, "%Y-%m-%d")?;
+                let d = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
                 let days = (d - epoch).num_days() as i32;
                 Ok(ca
                     .scatter_single(vec![row as IdxSize], Some(days))?
@@ -449,7 +454,7 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
             })?;
         }
         DataType::Datetime(_, _) => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 use chrono::{DateTime, NaiveDateTime};
                 let ca = c.datetime()?;
                 let ts = DateTime::parse_from_rfc3339(value)
@@ -458,17 +463,19 @@ fn set_cell_value(df: &mut DataFrame, row: usize, col: usize, value: &str) -> an
                         NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
                             .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
                             .map(|dt| dt.timestamp_micros())
-                    })?;
+                    })
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
                 Ok(ca
                     .scatter_single(vec![row as IdxSize], Some(ts))?
                     .into_series())
             })?;
         }
         DataType::Time => {
-            df.try_apply_at_idx(col, |c| -> PolarsResult<Series> {
+            df.try_apply_at_idx(col_idx, |c| -> PolarsResult<Series> {
                 use chrono::{NaiveTime, Timelike};
-                let ca = c.time()?;
-                let t = NaiveTime::parse_from_str(value, "%H:%M:%S")?;
+                let ca = c.i64()?;
+                let t = NaiveTime::parse_from_str(value, "%H:%M:%S")
+                    .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
                 let ns =
                     (t.num_seconds_from_midnight() as i64) * 1_000_000_000 + t.nanosecond() as i64;
                 Ok(ca
@@ -536,8 +543,9 @@ impl ParquetApp {
     /// Load the current page from the Parquet file.
     fn load_page(&mut self) {
         if let Some(cached) = self.page_cache.get(&self.page_start) {
+            let cached = cached.clone();
             self.edit_df = Some(cached.clone());
-            self.refresh_dataframe_state(cached);
+            self.refresh_dataframe_state(&cached);
             let end = (self.page_start + cached.height()).min(self.total_rows);
             self.status = format!(
                 "Rows {}-{} of {}",
@@ -843,8 +851,8 @@ impl eframe::App for ParquetApp {
                     .body(|mut body| {
                         for row_idx in 0..head.height() {
                             body.row(18.0, |mut row| {
-                                for (col_idx, col) in df.get_columns().iter().enumerate() {
-                                    let dtype = col.dtype();
+                                for col_idx in 0..df.width() {
+                                    let dtype = df.dtypes()[col_idx];
                                     let cell = &mut self.rows[row_idx][col_idx];
                                     let match_idx = self
                                         .search_matches
@@ -1223,7 +1231,7 @@ impl eframe::App for ParquetApp {
                                                 .filter(|v| !v.is_nan())
                                                 .collect();
                                             if sorted.is_empty() {
-                                                continue;
+                                                return;
                                             }
                                             sorted.sort_by(|a, b| {
                                                 a.partial_cmp(b)
@@ -1765,10 +1773,12 @@ impl eframe::App for ParquetApp {
                 if let Some(meta) = &self.metadata {
                     ui.label("Metadata");
                     egui::Grid::new("meta_grid").striped(true).show(ui, |ui| {
-                        ui.label(format!(
-                            "File size: {} bytes",
-                            meta.file_metadata().total_byte_size()
-                        ));
+                        let size: i64 = meta
+                            .row_groups()
+                            .iter()
+                            .map(|rg| rg.total_byte_size())
+                            .sum();
+                        ui.label(format!("File size: {} bytes", size));
                         ui.end_row();
                         ui.label(format!("Row groups: {}", meta.num_row_groups()));
                         ui.end_row();
