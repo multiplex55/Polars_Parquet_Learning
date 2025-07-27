@@ -1,5 +1,5 @@
 use crate::{parquet_examples, xml_to_parquet};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use polars::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -57,10 +57,18 @@ pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
         let names = df.column("name")?.str()?;
         let values = df.column("value")?.str()?;
         for i in 0..df.height() {
-            let tid = tids.get(i).unwrap();
+            let tid = tids
+                .get(i)
+                .ok_or_else(|| anyhow!("missing value"))?;
             let f = xml_to_parquet::Field {
-                name: names.get(i).unwrap().to_string(),
-                value: values.get(i).unwrap().to_string(),
+                name: names
+                    .get(i)
+                    .ok_or_else(|| anyhow!("missing value"))?
+                    .to_string(),
+                value: values
+                    .get(i)
+                    .ok_or_else(|| anyhow!("missing value"))?
+                    .to_string(),
             };
             field_map.entry(tid).or_default().push(f);
         }
@@ -70,8 +78,13 @@ pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
     let ids = templates.column("id")?.u32()?;
     let names = templates.column("name")?.str()?;
     for i in 0..templates.height() {
-        let id = ids.get(i).unwrap();
-        let name = names.get(i).unwrap().to_string();
+        let id = ids
+            .get(i)
+            .ok_or_else(|| anyhow!("missing value"))?;
+        let name = names
+            .get(i)
+            .ok_or_else(|| anyhow!("missing value"))?
+            .to_string();
         let fields = field_map.remove(&id).unwrap_or_default();
         templates_vec.push(xml_to_parquet::Template { id, name, fields });
     }
@@ -81,9 +94,14 @@ pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
         let mids = df.column("message_id")?.u32()?;
         let contents = df.column("content")?.str()?;
         for i in 0..df.height() {
-            let mid = mids.get(i).unwrap();
+            let mid = mids
+                .get(i)
+                .ok_or_else(|| anyhow!("missing value"))?;
             let p = xml_to_parquet::Part {
-                content: contents.get(i).unwrap().to_string(),
+                content: contents
+                    .get(i)
+                    .ok_or_else(|| anyhow!("missing value"))?
+                    .to_string(),
             };
             part_map.entry(mid).or_default().push(p);
         }
@@ -93,8 +111,12 @@ pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
     let msg_ids = messages.column("id")?.u32()?;
     let msg_tids = messages.column("template_id")?.u32()?;
     for i in 0..messages.height() {
-        let id = msg_ids.get(i).unwrap();
-        let template_id = msg_tids.get(i).unwrap();
+        let id = msg_ids
+            .get(i)
+            .ok_or_else(|| anyhow!("missing value"))?;
+        let template_id = msg_tids
+            .get(i)
+            .ok_or_else(|| anyhow!("missing value"))?;
         let parts = part_map.remove(&id).unwrap_or_default();
         messages_vec.push(xml_to_parquet::Message {
             id,
@@ -107,8 +129,13 @@ pub fn read_parquet_to_root(dir: &str) -> Result<xml_to_parquet::Root> {
     let repo_ids = repositories.column("id")?.u32()?;
     let repo_paths = repositories.column("path")?.str()?;
     for i in 0..repositories.height() {
-        let id = repo_ids.get(i).unwrap();
-        let path = repo_paths.get(i).unwrap().to_string();
+        let id = repo_ids
+            .get(i)
+            .ok_or_else(|| anyhow!("missing value"))?;
+        let path = repo_paths
+            .get(i)
+            .ok_or_else(|| anyhow!("missing value"))?
+            .to_string();
         repos_vec.push(xml_to_parquet::Repository { id, path });
     }
 
