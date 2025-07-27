@@ -359,6 +359,7 @@ pub fn reorder_columns(df: &mut DataFrame, order: &[String]) -> Result<()> {
 ///
 /// The returned [`DataFrame`] contains a `column` label column followed by
 /// each input column containing the pairwise Pearson correlation coefficients.
+/// Null values are converted to `NaN` before the calculations.
 pub fn correlation_matrix(df: &DataFrame, columns: &[&str]) -> Result<DataFrame> {
     if columns.is_empty() {
         return Ok(DataFrame::default());
@@ -370,7 +371,11 @@ pub fn correlation_matrix(df: &DataFrame, columns: &[&str]) -> Result<DataFrame>
     for &name in columns {
         let s = df.column(name)?;
         let s = s.cast(&DataType::Float64)?;
-        let vals: Vec<f64> = s.f64()?.into_no_null_iter().collect();
+        let vals: Vec<f64> = s
+            .f64()?
+            .into_iter()
+            .map(|o| o.unwrap_or(f64::NAN))
+            .collect();
         data.push(vals);
     }
 

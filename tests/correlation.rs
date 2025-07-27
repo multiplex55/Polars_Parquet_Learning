@@ -41,3 +41,18 @@ fn matrix_symmetry() -> anyhow::Result<()> {
     assert!((bb - 1.0).abs() < 1e-12);
     Ok(())
 }
+
+#[test]
+fn matrix_with_nulls() -> anyhow::Result<()> {
+    let df = df!(
+        "a" => &[Some(1.0f64), None, Some(3.0)],
+        "b" => &[Some(1.0f64), Some(2.0), None]
+    )?;
+    let corr = correlation_matrix(&df, &["a", "b"])?;
+    assert_eq!(corr.shape(), (2, 3));
+    let ab = corr.column("b")?.f64()?.get(0).unwrap();
+    let ba = corr.column("a")?.f64()?.get(1).unwrap();
+    assert!(ab.is_nan());
+    assert!(ba.is_nan());
+    Ok(())
+}
