@@ -227,9 +227,9 @@ pub fn dataframe_to_items(df: &DataFrame) -> Result<Vec<Vec<ExampleItem>>> {
         let t_iter = t_series.str()?;
         let v_iter = v_series.str()?;
         let row: Result<Vec<ExampleItem>> = t_iter
-            .into_no_null_iter()
-            .zip(v_iter.into_no_null_iter())
-            .map(|(t, v)| ExampleItem::from_parts(t, v))
+            .into_iter()
+            .zip(v_iter.into_iter())
+            .map(|(t, v)| ExampleItem::from_parts(t.unwrap(), v.unwrap()))
             .collect();
         rows.push(row?);
     }
@@ -897,12 +897,17 @@ mod tests {
         let names = df.get_column_names();
         assert_eq!(names, vec!["id", "name"]);
         assert_eq!(df.dtypes(), vec![DataType::Int64, DataType::String]);
-        let ids: Vec<i64> = df.column("id")?.i64()?.into_no_null_iter().collect();
+        let ids: Vec<i64> = df
+            .column("id")?
+            .i64()?
+            .into_iter()
+            .map(|o| o.unwrap())
+            .collect();
         let names_col: Vec<String> = df
             .column("name")?
             .str()?
-            .into_no_null_iter()
-            .map(|s| s.to_string())
+            .into_iter()
+            .map(|o| o.unwrap().to_string())
             .collect();
         assert_eq!(ids, vec![1, 2]);
         assert_eq!(names_col, vec!["a".to_string(), "b".to_string()]);
@@ -922,8 +927,18 @@ mod tests {
 
         let df = create_dataframe(&schema, &rows)?;
         assert_eq!(df.dtypes(), vec![DataType::Float64, DataType::Boolean]);
-        let vals: Vec<f64> = df.column("val")?.f64()?.into_no_null_iter().collect();
-        let flags: Vec<bool> = df.column("flag")?.bool()?.into_no_null_iter().collect();
+        let vals: Vec<f64> = df
+            .column("val")?
+            .f64()?
+            .into_iter()
+            .map(|o| o.unwrap())
+            .collect();
+        let flags: Vec<bool> = df
+            .column("flag")?
+            .bool()?
+            .into_iter()
+            .map(|o| o.unwrap())
+            .collect();
         assert_eq!(vals, vec![1.5, 2.5]);
         assert_eq!(flags, vec![true, false]);
         Ok(())
@@ -982,7 +997,12 @@ mod tests {
                 DataType::Time,
             ]
         );
-        let dates: Vec<i32> = df.column("d")?.date()?.into_no_null_iter().collect();
+        let dates: Vec<i32> = df
+            .column("d")?
+            .date()?
+            .into_iter()
+            .map(|o| o.unwrap())
+            .collect();
         assert_eq!(dates.len(), 2);
         Ok(())
     }
@@ -1127,7 +1147,12 @@ mod tests {
 
         let slice = read_parquet_slice(file.to_str().unwrap(), 1, 2)?;
         assert_eq!(slice.height(), 2);
-        let ids: Vec<i64> = slice.column("id")?.i64()?.into_no_null_iter().collect();
+        let ids: Vec<i64> = slice
+            .column("id")?
+            .i64()?
+            .into_iter()
+            .map(|o| o.unwrap())
+            .collect();
         assert_eq!(ids, vec![2, 3]);
         Ok(())
     }

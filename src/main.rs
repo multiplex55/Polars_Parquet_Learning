@@ -1115,10 +1115,16 @@ impl eframe::App for ParquetApp {
                         if let Ok(series) = df.column(col) {
                             let values: Vec<f64> = series
                                 .f64()
-                                .map(|ca| ca.into_no_null_iter().collect())
+                                .map(|ca| {
+                                    ca.into_iter()
+                                        .map(|o| o.unwrap_or(f64::NAN))
+                                        .collect()
+                                })
                                 .or_else(|_| {
                                     series.i64().map(|ca| {
-                                        ca.into_no_null_iter().map(|v| v as f64).collect()
+                                        ca.into_iter()
+                                            .map(|o| o.map(|v| v as f64).unwrap_or(f64::NAN))
+                                            .collect()
                                     })
                                 })
                                 .unwrap_or_default();
@@ -1174,11 +1180,15 @@ impl eframe::App for ParquetApp {
                                             if let Ok(ys) = df.column(ycol) {
                                                 let y_vals: Vec<f64> = ys
                                                     .f64()
-                                                    .map(|ca| ca.into_no_null_iter().collect())
+                                                    .map(|ca| {
+                                                        ca.into_iter()
+                                                            .map(|o| o.unwrap_or(f64::NAN))
+                                                            .collect()
+                                                    })
                                                     .or_else(|_| {
                                                         ys.i64().map(|ca| {
-                                                            ca.into_no_null_iter()
-                                                                .map(|v| v as f64)
+                                                            ca.into_iter()
+                                                                .map(|o| o.map(|v| v as f64).unwrap_or(f64::NAN))
                                                                 .collect()
                                                         })
                                                     })
