@@ -137,6 +137,19 @@ pub fn write_dataframe_to_json(df: &mut DataFrame, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Write a [`DataFrame`] to an Arrow IPC file.
+pub fn write_arrow_file(df: &mut DataFrame, path: &str) -> Result<()> {
+    let file = File::create(path)?;
+    IpcWriter::new(file).finish(df)?;
+    Ok(())
+}
+
+/// Read a [`DataFrame`] from an Arrow IPC file.
+pub fn read_arrow_file(path: &str) -> Result<DataFrame> {
+    let file = File::open(path)?;
+    Ok(IpcReader::new(file).finish()?)
+}
+
 /// Example structs used to demonstrate Dremel encoded columns.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Foo {
